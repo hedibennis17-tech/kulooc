@@ -64,9 +64,10 @@ export function LoginForm() {
   // Redirect if user is already logged in
   useEffect(() => {
     if (!isUserLoading && user) {
-      router.push('/');
+      const redirect = searchParams.get('redirect') || '/dashboard';
+      router.push(redirect);
     }
-  }, [user, isUserLoading, router]);
+  }, [user, isUserLoading, router, searchParams]);
 
 
 
@@ -150,7 +151,7 @@ export function LoginForm() {
       const result = await signInWithPopup(auth, provider);
       if (result.user) {
         toast({ title: 'Connexion réussie !' });
-        router.push('/');
+        router.push('/dashboard');
       }
     } catch (error: any) {
       console.error("Social login error:", error);
