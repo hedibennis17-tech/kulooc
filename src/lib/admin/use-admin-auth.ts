@@ -27,9 +27,31 @@ export function useAdminAuth(): AdminAuthState {
   });
 
   useEffect(() => {
-    if (isUserLoading) return;
+    console.log('[useAdminAuth] isUserLoading:', isUserLoading, 'user:', user?.email);
+    
+    // Timeout de sécurité : si après 10 secondes on est toujours en loading, on force l'erreur
+    const timeout = setTimeout(() => {
+      setState(prev => {
+        if (prev.isLoading) {
+          console.error('[useAdminAuth] TIMEOUT - Firebase ne répond pas');
+          return {
+            adminUser: null,
+            role: null,
+            permissions: null,
+            isLoading: false,
+            isAuthorized: false,
+            error: 'Erreur de connexion Firebase - Timeout',
+          };
+        }
+        return prev;
+      });
+    }, 10000);
+
+    if (isUserLoading) return () => clearTimeout(timeout);
 
     if (!user) {
+      clearTimeout(timeout);
+      console.log('[useAdminAuth] Pas d\'utilisateur connecté');
       setState({
         adminUser: null,
         role: null,
@@ -43,8 +65,11 @@ export function useAdminAuth(): AdminAuthState {
 
     const checkAdminRole = async () => {
       try {
+        console.log('[useAdminAuth] Checking admin role for:', user.email);
         // Super admin automatique pour hedibennis17@gmail.com
         if (user.email === SUPER_ADMIN_EMAIL) {
+          console.log('[useAdminAuth] Super admin detected!');
+          clearTimeout(timeout);
           const adminUser: AdminUser = {
             uid: user.uid,
             email: user.email!,
@@ -70,6 +95,7 @@ export function useAdminAuth(): AdminAuthState {
             isAuthorized: true,
             error: null,
           });
+          console.log('[useAdminAuth] Super admin state set successfully');
           return;
         }
 
@@ -127,6 +153,8 @@ export function useAdminAuth(): AdminAuthState {
           error: null,
         });
       } catch (err: any) {
+        console.error('[useAdminAuth] Error:', err);
+        clearTimeout(timeout);
         setState({
           adminUser: null,
           role: null,
@@ -139,6 +167,8 @@ export function useAdminAuth(): AdminAuthState {
     };
 
     checkAdminRole();
+    
+    return () => clearTimeout(timeout);
   }, [user, isUserLoading]);
 
   return state;
