@@ -18,7 +18,6 @@ import {
   ExternalLink,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { seedFirestore } from '@/lib/firestore/seed';
 
 type SeedStatus = 'idle' | 'running' | 'success' | 'error';
 
@@ -31,7 +30,9 @@ export default function AdminPage() {
     setSeedStatus('running');
     setSeedMessage('Initialisation en cours...');
     try {
-      const result = await seedFirestore();
+      // Appel côté serveur — contourne les règles Firestore client
+      const res = await fetch('/api/admin/seed', { method: 'POST' });
+      const result = await res.json();
       if (result.success) {
         setSeedStatus('success');
         setSeedMessage(result.message);
