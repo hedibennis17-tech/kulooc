@@ -10,8 +10,6 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signInWithPopup,
-  signInWithRedirect,
-  getRedirectResult,
   GoogleAuthProvider,
   FacebookAuthProvider,
   OAuthProvider,
@@ -70,27 +68,7 @@ export function LoginForm() {
     }
   }, [user, isUserLoading, router]);
 
-  // Handle redirect result after social login redirect
-  useEffect(() => {
-    if (!auth) return;
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          toast({ title: 'Connexion réussie !' });
-          router.push('/');
-        }
-      })
-      .catch((error: any) => {
-        if (error.code && error.code !== 'auth/no-current-user') {
-          console.error("Redirect result error:", error);
-          toast({
-            variant: 'destructive',
-            title: 'Erreur de connexion',
-            description: "La connexion sociale a échoué. Veuillez réessayer.",
-          });
-        }
-      });
-  }, [auth, router, toast]);
+
 
   const {
     register,
@@ -169,24 +147,27 @@ export function LoginForm() {
     }
 
     try {
-      // Use signInWithRedirect to avoid auth/unauthorized-domain error on Vercel.
-      // The redirect flows through the authorized Firebase authDomain.
-      await signInWithRedirect(auth, provider);
-      // Page will redirect — no code runs after this line
+      const result = await signInWithPopup(auth, provider);
+      if (result.user) {
+        toast({ title: 'Connexion réussie !' });
+        router.push('/');
+      }
     } catch (error: any) {
       console.error("Social login error:", error);
       let description = "Impossible de se connecter avec ce fournisseur. Veuillez réessayer.";
       if (error.code === 'auth/operation-not-allowed') {
         description = "La méthode de connexion n'est pas activée dans Firebase.";
-      } else if (error.code === 'auth/unauthorized-domain') {
-        description = "Domaine non autorisé. Veuillez utiliser la connexion par email.";
+      } else if (error.code === 'auth/popup-closed-by-user') {
+        description = "La fenêtre de connexion a été fermée. Veuillez réessayer.";
+      } else if (error.code === 'auth/popup-blocked') {
+        description = "La fenêtre popup a été bloquée. Autorisez les popups pour ce site.";
       }
-      
       toast({
         variant: 'destructive',
         title: 'Une erreur de connexion est survenue',
         description: description,
       });
+    } finally {
       setIsLoading(false);
       setAuthProvider(null);
     }
