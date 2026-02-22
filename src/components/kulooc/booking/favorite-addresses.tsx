@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Home, Briefcase, Heart, Plus, X, MapPin } from 'lucide-react';
 import { useUser } from '@/firebase/provider';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
-import { db } from '@/firebase/config';
+import { db } from '@/firebase';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 

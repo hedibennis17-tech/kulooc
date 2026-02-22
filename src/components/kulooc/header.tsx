@@ -25,7 +25,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
-import { SidebarTrigger } from "@/components/ui/sidebar";
+
 
 export function AppHeader() {
   const { user, isUserLoading } = useUser();
@@ -40,7 +40,6 @@ export function AppHeader() {
   return (
     <header className="bg-white shadow-sm p-4 flex items-center justify-between z-20">
       <div className="flex items-center gap-4">
-        <SidebarTrigger />
         <Link href="/" className="text-2xl font-bold tracking-tighter text-primary">KULOOC</Link>
         <nav className="hidden md:flex items-center gap-6">
           <Link href="#" className="flex items-center gap-2 text-sm font-medium pb-2 border-b-2 border-primary">

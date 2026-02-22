@@ -288,7 +288,7 @@ export function SearchStep({ onSearch }: SearchStepProps) {
             className="w-full bg-muted border-none rounded-md py-6 text-base focus:ring-primary flex items-center gap-4 px-4 hover:bg-gray-200 transition-colors"
           >
             <User className="h-5 w-5 text-gray-500" />
-            <span>{rideFor === 'me' ? 'Pour moi' : 'Pour quelqu'un d'autre'}</span>
+            <span>{rideFor === 'me' ? 'Pour moi' : 'Pour quelqu\'un d\'autre'}</span>
           </button>
 
           <Button type="submit" size="lg" className="w-full h-14 text-lg rounded-lg">
