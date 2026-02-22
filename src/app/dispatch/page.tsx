@@ -1,8 +1,7 @@
 'use client';
 
 import React, { useState, useCallback } from 'react';
-import { Sidebar, SidebarInset, SidebarProvider } from '@/components/ui/sidebar';
-import { AppHeader } from '@/components/kulooc/header';
+// Sidebar and Header removed for fullscreen dispatch view
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -46,11 +45,7 @@ export default function DispatcherDashboardPage() {
   }, []);
 
   return (
-    <SidebarProvider>
-      <Sidebar side="left" collapsible="icon" className="bg-white border-r p-0 shadow-lg z-10" />
-      <SidebarInset>
         <div className="flex flex-col min-h-screen bg-gray-50 dark:bg-gray-950">
-          <AppHeader />
 
           <main className="flex-1 flex flex-col gap-3 p-3 lg:p-4 overflow-hidden">
 
@@ -245,7 +240,5 @@ export default function DispatcherDashboardPage() {
             </div>
           </main>
         </div>
-      </SidebarInset>
-    </SidebarProvider>
   );
 }

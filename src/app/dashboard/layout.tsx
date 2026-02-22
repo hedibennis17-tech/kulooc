@@ -38,6 +38,7 @@ import {
 import { signOut } from 'firebase/auth';
 import { useAuth } from '@/firebase/provider';
 import { cn } from '@/lib/utils';
+import { ThemeToggle } from '@/components/theme/theme-toggle';
 
 const navItems = [
   { href: '/dashboard', label: 'Dashboard', icon: LayoutDashboard, exact: true },
@@ -241,6 +242,9 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
           </div>
 
           <div className="flex items-center gap-2">
+            {/* Theme Toggle */}
+            <ThemeToggle />
+            
             {/* SMS indicator */}
             <Button variant="ghost" size="icon" className="relative text-gray-400 hover:text-white" asChild>
               <Link href="/dashboard/sms">
