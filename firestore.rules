@@ -289,6 +289,19 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
+    // ── favorite_addresses ────────────────────────────────────────────────────
+    // Adresses favorites des utilisateurs (Maison, Travail, etc.)
+    match /favorite_addresses/{addressId} {
+      // Lecture : utilisateur connecté peut lire ses propres adresses
+      allow get, list: if isSignedIn() && resource.data.userId == request.auth.uid;
+      // Création : utilisateur connecté peut créer ses propres adresses
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      // Mise à jour : utilisateur connecté peut modifier ses propres adresses
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && isImmutable('userId');
+      // Suppression : utilisateur connecté peut supprimer ses propres adresses
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
+
     // ── admin_users ───────────────────────────────────────────────────────────
     // Utilisateurs admin - accès restreint aux utilisateurs authentifiés
     match /admin_users/{userId} {
