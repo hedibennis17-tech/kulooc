@@ -3,13 +3,13 @@
     {
       "id": "driver-avatar",
       "description": "Avatar for a driver profile picture",
-      "imageUrl": "https://images.unsplash.com/photo-1521119989659-a83eee488004?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&ixid=M3w3NDE5ODJ8MHwxfHNlYXJjaHw3fHxwZXJzb24lMjBwb3J0cmFpdHxlbnwwfHx8fDE3NzE1OTUwNDd8MA&ixlib=rb-4.1.0&q=80&w=1080",
+      "imageUrl": "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?q=80&w=1080&auto=format&fit=crop",
       "imageHint": "person portrait"
     },
     {
       "id": "login-background",
       "description": "Background image for the login page.",
-      "imageUrl": "https://images.unsplash.com/photo-1549053939-7de7a78333f7?q=80&w=1974&auto=format&fit=crop",
+      "imageUrl": "https://images.unsplash.com/photo-1480714378408-67cf0d13bc1b?q=80&w=1974&auto=format&fit=crop",
       "imageHint": "city street night"
     }
   ]
