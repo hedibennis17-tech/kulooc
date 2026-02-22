@@ -1,0 +1,6 @@
+{
+  "scripts": {
+    "dispatch": "ts-node scripts/dispatch-service.ts",
+    "dispatch:dev": "nodemon --watch scripts --exec ts-node scripts/dispatch-service.ts"
+  }
+}
