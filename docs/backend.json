@@ -1,0 +1,773 @@
+{
+  "entities": {
+    "UserProfile": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "UserProfile",
+      "type": "object",
+      "description": "Represents a user's profile information within the KULOOC application, linked to an external authentication system.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the UserProfile entity."
+        },
+        "firstName": {
+          "type": "string",
+          "description": "The first name of the user."
+        },
+        "lastName": {
+          "type": "string",
+          "description": "The last name of the user."
+        },
+        "email": {
+          "type": "string",
+          "description": "The user's email address for contact and notifications, not for authentication.",
+          "format": "email"
+        },
+        "phoneNumber": {
+          "type": "string",
+          "description": "The user's phone number for contact and notifications, not for authentication."
+        },
+        "profilePictureUrl": {
+          "type": "string",
+          "description": "URL to the user's profile picture.",
+          "format": "uri"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the user profile was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the user profile was last updated.",
+          "format": "date-time"
+        },
+        "preferredLanguage": {
+          "type": "string",
+          "description": "The user's preferred language for the application interface (e.g., 'en', 'fr')."
+        },
+        "defaultVehiclePreference": {
+          "type": "string",
+          "description": "User's preference for vehicle type in ride matching (e.g., 'electric', 'hybrid', 'any')."
+        },
+        "homeAddressId": {
+          "type": "string",
+          "description": "Reference to the user's primary home address. (Relationship: UserProfile 1:1 Address)"
+        },
+        "workAddressId": {
+          "type": "string",
+          "description": "Reference to the user's primary work address. (Relationship: UserProfile 1:1 Address)"
+        },
+        "frequentAddressIds": {
+          "type": "array",
+          "description": "References to a list of frequently used addresses by the user. (Relationship: UserProfile 1:N Address)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "favoriteServiceIds": {
+          "type": "array",
+          "description": "References to a list of services marked as favorite by the user. (Relationship: UserProfile N:N Service)",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "firstName",
+        "lastName",
+        "email",
+        "phoneNumber",
+        "createdAt",
+        "updatedAt",
+        "preferredLanguage"
+      ]
+    },
+    "Address": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Address",
+      "type": "object",
+      "description": "Stores detailed information about a physical location, used for pickups, destinations, and points of interest.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Address entity."
+        },
+        "streetNumber": {
+          "type": "string",
+          "description": "The street number of the address."
+        },
+        "streetName": {
+          "type": "string",
+          "description": "The name of the street."
+        },
+        "city": {
+          "type": "string",
+          "description": "The city of the address."
+        },
+        "provinceState": {
+          "type": "string",
+          "description": "The province or state of the address."
+        },
+        "postalZipCode": {
+          "type": "string",
+          "description": "The postal or zip code of the address."
+        },
+        "country": {
+          "type": "string",
+          "description": "The country of the address."
+        },
+        "latitude": {
+          "type": "number",
+          "description": "The geographical latitude of the address."
+        },
+        "longitude": {
+          "type": "number",
+          "description": "The geographical longitude of the address."
+        },
+        "isQuebecAddress": {
+          "type": "boolean",
+          "description": "Indicates if the address is located in Quebec, used for bilingual interface logic."
+        },
+        "translatedStreetName": {
+          "type": "string",
+          "description": "Optional translated street name, if different from the original and relevant for display."
+        },
+        "fullAddressString": {
+          "type": "string",
+          "description": "A comprehensive string representation of the full address."
+        },
+        "label": {
+          "type": "string",
+          "description": "A user-defined label for the address (e.g., 'Home', 'Work', 'Friend's Place')."
+        }
+      },
+      "required": [
+        "id",
+        "streetNumber",
+        "streetName",
+        "city",
+        "provinceState",
+        "postalZipCode",
+        "country",
+        "latitude",
+        "longitude",
+        "isQuebecAddress",
+        "fullAddressString"
+      ]
+    },
+    "DriverProfile": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "DriverProfile",
+      "type": "object",
+      "description": "Extends a UserProfile with specific details required for a driver within the KULOOC application.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the DriverProfile entity."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to the associated UserProfile. (Relationship: DriverProfile 1:1 UserProfile)"
+        },
+        "vehicleType": {
+          "type": "string",
+          "description": "The type of vehicle the driver uses (e.g., 'Electric', 'Hybrid', 'Standard')."
+        },
+        "vehicleMake": {
+          "type": "string",
+          "description": "The make of the driver's vehicle."
+        },
+        "vehicleModel": {
+          "type": "string",
+          "description": "The model of the driver's vehicle."
+        },
+        "licensePlate": {
+          "type": "string",
+          "description": "The license plate number of the driver's vehicle."
+        },
+        "averageRating": {
+          "type": "number",
+          "description": "The driver's average rating based on completed rides."
+        },
+        "totalRides": {
+          "type": "number",
+          "description": "The total number of rides completed by the driver."
+        },
+        "isAvailable": {
+          "type": "boolean",
+          "description": "Indicates if the driver is currently available for rides."
+        },
+        "currentLocationLatitude": {
+          "type": "number",
+          "description": "The current geographical latitude of the driver."
+        },
+        "currentLocationLongitude": {
+          "type": "number",
+          "description": "The current geographical longitude of the driver."
+        },
+        "languagePreference": {
+          "type": "string",
+          "description": "The driver's preferred language for communication with users (e.g., 'en', 'fr')."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the driver profile was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the driver profile was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "vehicleType",
+        "vehicleMake",
+        "vehicleModel",
+        "licensePlate",
+        "averageRating",
+        "totalRides",
+        "isAvailable",
+        "currentLocationLatitude",
+        "currentLocationLongitude",
+        "languagePreference",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Ride": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Ride",
+      "type": "object",
+      "description": "Represents a single ride request and its lifecycle, connecting a user and a driver.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Ride entity."
+        },
+        "userId": {
+          "type": "string",
+          "description": "Reference to the UserProfile who requested the ride. (Relationship: UserProfile 1:N Ride)"
+        },
+        "driverProfileId": {
+          "type": "string",
+          "description": "Reference to the DriverProfile assigned to the ride. (Relationship: DriverProfile 1:N Ride)"
+        },
+        "pickupAddressId": {
+          "type": "string",
+          "description": "Reference to the Address where the ride starts. (Relationship: Address 1:N Ride)"
+        },
+        "destinationAddressId": {
+          "type": "string",
+          "description": "Reference to the Address where the ride ends. (Relationship: Address 1:N Ride)"
+        },
+        "startTime": {
+          "type": "string",
+          "description": "Timestamp when the ride officially started.",
+          "format": "date-time"
+        },
+        "endTime": {
+          "type": "string",
+          "description": "Timestamp when the ride officially ended.",
+          "format": "date-time"
+        },
+        "status": {
+          "type": "string",
+          "description": "The current status of the ride (e.g., 'Pending', 'Accepted', 'EnRoute', 'Completed', 'Cancelled')."
+        },
+        "fareAmount": {
+          "type": "number",
+          "description": "The final fare amount for the ride."
+        },
+        "lockedFareAmount": {
+          "type": "number",
+          "description": "The fare amount locked by the user to avoid surge pricing."
+        },
+        "fareLockExpirationTime": {
+          "type": "string",
+          "description": "Timestamp when the locked fare expires.",
+          "format": "date-time"
+        },
+        "distanceKm": {
+          "type": "number",
+          "description": "The total distance of the ride in kilometers."
+        },
+        "durationMinutes": {
+          "type": "number",
+          "description": "The total duration of the ride in minutes."
+        },
+        "userRating": {
+          "type": "number",
+          "description": "The rating given by the user to the driver for this ride."
+        },
+        "driverRating": {
+          "type": "number",
+          "description": "The rating given by the driver to the user for this ride."
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the ride request was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the ride record was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "userId",
+        "pickupAddressId",
+        "destinationAddressId",
+        "status",
+        "fareAmount",
+        "createdAt"
+      ]
+    },
+    "Service": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Service",
+      "type": "object",
+      "description": "Defines a service offered by KULOOC, such as ride-sharing or package delivery.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Service entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the service (e.g., 'Standard Ride', 'Eco Ride', 'Package Delivery')."
+        },
+        "description": {
+          "type": "string",
+          "description": "A detailed description of the service."
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Indicates if the service is currently active and available to users."
+        },
+        "iconUrl": {
+          "type": "string",
+          "description": "URL to an icon representing the service.",
+          "format": "uri"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the service was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the service was last updated.",
+          "format": "date-time"
+        },
+        "promotionIds": {
+          "type": "array",
+          "description": "References to promotions applicable to this service. (Relationship: Service N:N Promotion)",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "description",
+        "isActive",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "Promotion": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "Promotion",
+      "type": "object",
+      "description": "Manages promotional offers and discounts available within the KULOOC application.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the Promotion entity."
+        },
+        "code": {
+          "type": "string",
+          "description": "The unique code that users can apply for the promotion."
+        },
+        "description": {
+          "type": "string",
+          "description": "A description of the promotion and its terms."
+        },
+        "discountType": {
+          "type": "string",
+          "description": "The type of discount (e.g., 'Percentage', 'FixedAmount')."
+        },
+        "discountValue": {
+          "type": "number",
+          "description": "The value of the discount (e.g., '10' for 10% or $10)."
+        },
+        "startDate": {
+          "type": "string",
+          "description": "The date and time when the promotion becomes active.",
+          "format": "date-time"
+        },
+        "endDate": {
+          "type": "string",
+          "description": "The date and time when the promotion expires.",
+          "format": "date-time"
+        },
+        "minimumSpend": {
+          "type": "number",
+          "description": "The minimum amount a user must spend to be eligible for the promotion."
+        },
+        "isActive": {
+          "type": "boolean",
+          "description": "Indicates if the promotion is currently active and can be used."
+        },
+        "serviceIds": {
+          "type": "array",
+          "description": "References to services to which this promotion applies. (Relationship: Promotion N:N Service)",
+          "items": {
+            "type": "string"
+          }
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the promotion was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the promotion was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "code",
+        "description",
+        "discountType",
+        "discountValue",
+        "startDate",
+        "endDate",
+        "isActive",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "PointOfInterest": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "PointOfInterest",
+      "type": "object",
+      "description": "Represents a location of interest on the map, such as restaurants or charging stations.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the PointOfInterest entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "The name of the point of interest."
+        },
+        "description": {
+          "type": "string",
+          "description": "A brief description of the point of interest."
+        },
+        "category": {
+          "type": "string",
+          "description": "The category of the POI (e.g., 'Restaurant', 'Charging Station', 'Landmark')."
+        },
+        "fullAddressString": {
+          "type": "string",
+          "description": "The full address string of the point of interest."
+        },
+        "latitude": {
+          "type": "number",
+          "description": "The geographical latitude of the point of interest."
+        },
+        "longitude": {
+          "type": "number",
+          "description": "The geographical longitude of the point of interest."
+        },
+        "iconUrl": {
+          "type": "string",
+          "description": "URL to an icon representing the point of interest on the map.",
+          "format": "uri"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the point of interest was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the point of interest was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "category",
+        "fullAddressString",
+        "latitude",
+        "longitude",
+        "createdAt",
+        "updatedAt"
+      ]
+    },
+    "AppConfiguration": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "AppConfiguration",
+      "type": "object",
+      "description": "Stores dynamic application settings and configurations, fetched at runtime.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the AppConfiguration entity (e.g., a specific configuration key)."
+        },
+        "key": {
+          "type": "string",
+          "description": "The unique key identifying the configuration setting (e.g., 'activeServices', 'defaultLanguage')."
+        },
+        "value": {
+          "type": "string",
+          "description": "The value of the configuration setting, which can be a string, JSON, or other serialized format."
+        },
+        "description": {
+          "type": "string",
+          "description": "A description of what this configuration key controls."
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when this configuration setting was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "key",
+        "value",
+        "description",
+        "updatedAt"
+      ]
+    },
+    "HighDemandZone": {
+      "$schema": "http://json-schema.org/draft-07/schema#",
+      "title": "HighDemandZone",
+      "type": "object",
+      "description": "Defines geographic areas with high service demand, potentially affecting pricing.",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique identifier for the HighDemandZone entity."
+        },
+        "name": {
+          "type": "string",
+          "description": "A recognizable name for the high demand zone (e.g., 'Downtown Rush Hour')."
+        },
+        "description": {
+          "type": "string",
+          "description": "A description of the high demand zone."
+        },
+        "geojsonPolygon": {
+          "type": "string",
+          "description": "A GeoJSON string representing the polygonal boundaries of the high demand zone."
+        },
+        "multiplier": {
+          "type": "number",
+          "description": "The surge pricing multiplier applied to fares within this zone."
+        },
+        "startTime": {
+          "type": "string",
+          "description": "The start time for when this high demand zone's multiplier is active (e.g., daily recurring time).",
+          "format": "date-time"
+        },
+        "endTime": {
+          "type": "string",
+          "description": "The end time for when this high demand zone's multiplier is active (e.g., daily recurring time).",
+          "format": "date-time"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "Timestamp when the high demand zone was created.",
+          "format": "date-time"
+        },
+        "updatedAt": {
+          "type": "string",
+          "description": "Timestamp when the high demand zone was last updated.",
+          "format": "date-time"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "geojsonPolygon",
+        "multiplier",
+        "createdAt",
+        "updatedAt"
+      ]
+    }
+  },
+  "auth": {
+    "providers": [
+      "password",
+      "google.com",
+      "apple.com",
+      "facebook.com",
+      "phone"
+    ]
+  },
+  "firestore": {
+    "structure": [
+      {
+        "path": "/users/{userId}",
+        "definition": {
+          "entityName": "UserProfile",
+          "schema": {
+            "$ref": "#/backend/entities/UserProfile"
+          },
+          "description": "Stores the profile information for a specific user. The document ID `{userId}` directly corresponds to the user's Firebase Authentication UID. The `id` field within the document mirrors this `userId`."
+        }
+      },
+      {
+        "path": "/users/{userId}/addresses/{addressId}",
+        "definition": {
+          "entityName": "Address",
+          "schema": {
+            "$ref": "#/backend/entities/Address"
+          },
+          "description": "Stores addresses associated with a specific user. The `ownerId` field (string) within the document denormalizes the parent `{userId}` for authorization independence.",
+          "params": [
+            {
+              "name": "userId",
+              "description": "The unique identifier of the user (Firebase Authentication UID)."
+            },
+            {
+              "name": "addressId",
+              "description": "The unique identifier of the address."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/drivers/{driverId}",
+        "definition": {
+          "entityName": "DriverProfile",
+          "schema": {
+            "$ref": "#/backend/entities/DriverProfile"
+          },
+          "description": "Stores specific details for a driver. The `userId` field within the document stores the Firebase Authentication UID of the associated user, crucial for authorization independence.",
+          "params": [
+            {
+              "name": "driverId",
+              "description": "The unique identifier for the driver profile."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/rides/{rideId}",
+        "definition": {
+          "entityName": "Ride",
+          "schema": {
+            "$ref": "#/backend/entities/Ride"
+          },
+          "description": "Stores details of individual rides. Includes denormalized `userId` (rider's UID) and `driverUserId` (string, the Firebase Authentication UID of the assigned driver) for robust authorization independence, allowing both parties to access their respective rides.",
+          "params": [
+            {
+              "name": "rideId",
+              "description": "The unique identifier for the ride."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/services/{serviceId}",
+        "definition": {
+          "entityName": "Service",
+          "schema": {
+            "$ref": "#/backend/entities/Service"
+          },
+          "description": "Stores global service definitions available in the application. These are generally publicly readable and admin-managed.",
+          "params": [
+            {
+              "name": "serviceId",
+              "description": "The unique identifier for the service."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/promotions/{promotionId}",
+        "definition": {
+          "entityName": "Promotion",
+          "schema": {
+            "$ref": "#/backend/entities/Promotion"
+          },
+          "description": "Stores global promotional offers. These are generally publicly readable and admin-managed.",
+          "params": [
+            {
+              "name": "promotionId",
+              "description": "The unique identifier for the promotion."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/pointsOfInterest/{poiId}",
+        "definition": {
+          "entityName": "PointOfInterest",
+          "schema": {
+            "$ref": "#/backend/entities/PointOfInterest"
+          },
+          "description": "Stores global points of interest on the map. These are publicly readable.",
+          "params": [
+            {
+              "name": "poiId",
+              "description": "The unique identifier for the point of interest."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/appConfigurations/{configId}",
+        "definition": {
+          "entityName": "AppConfiguration",
+          "schema": {
+            "$ref": "#/backend/entities/AppConfiguration"
+          },
+          "description": "Stores dynamic application settings and configurations. These are publicly readable for clients and admin-managed.",
+          "params": [
+            {
+              "name": "configId",
+              "description": "The unique identifier for the application configuration setting."
+            }
+          ]
+        }
+      },
+      {
+        "path": "/highDemandZones/{zoneId}",
+        "definition": {
+          "entityName": "HighDemandZone",
+          "schema": {
+            "$ref": "#/backend/entities/HighDemandZone"
+          },
+          "description": "Stores definitions of high-demand geographic zones. These are publicly readable for displaying surge pricing areas and admin-managed.",
+          "params": [
+            {
+              "name": "zoneId",
+              "description": "The unique identifier for the high demand zone."
+            }
+          ]
+        }
+      }
+    ],
+    "reasoning": "The Firestore structure for the KULOOC application prioritizes Authorization Independence, Structural Segregation, and consistent Access Modeling to ensure robust security, scalability, and debuggability. All authorization decisions are designed to avoid `get()` calls in security rules, relying instead on denormalized data within the document itself or path-based ownership.\n\n**Authorization Independence & Denormalization:**\n*   **UserProfile:** Stored at `/users/{userId}`. The `userId` in the path directly corresponds to `request.auth.uid`, making access simple and private to the user without needing additional document lookups. The `id` field within the `UserProfile` document will mirror this `userId`.\n*   **Address:** Stored as a subcollection at `/users/{userId}/addresses/{addressId}`. For strong authorization independence, the `Address` document will include an `ownerId` field (string) that explicitly stores the `userId` from its parent path. This allows any entity referencing an `Address` to perform ownership checks directly on the `Address` document if needed, although for user-specific addresses, the path itself provides primary ownership.\n*   **DriverProfile:** Stored at `/drivers/{driverId}`. Each `DriverProfile` document will contain a `userId` field (string) that is the Firebase Authentication UID of the associated user. This denormalization is crucial, allowing security rules to verify `request.auth.uid == resource.data.userId` for a driver managing their own profile, without needing to `get()` the corresponding `UserProfile`.\n*   **Ride:** Stored at `/rides/{rideId}`. This entity represents a collaborative interaction between a user (rider) and a driver. To ensure authorization independence for both parties, the `Ride` document will denormalize *two* UID fields: `userId` (for the rider, already in schema) and a new `driverUserId` (string, representing the Firebase UID of the assigned driver). This allows security rules to check `request.auth.uid == resource.data.userId || request.auth.uid == resource.data.driverUserId` without any `get()` operations.\n\n**Queryable Authorization Patterns (QAPs):**\n*   **User Profiles and Addresses:** The path-based structure `/users/{userId}/profile` and `/users/{userId}/addresses/{addressId}` inherently supports QAPs. A user can easily `list` their own addresses or retrieve their profile by querying the specific path segment corresponding to their `uid` (`request.auth.uid`).\n*   **Driver Profiles:** The top-level `/drivers/{driverId}` collection, combined with the denormalized `userId` field within each `DriverProfile`, allows for efficient queries by specific `userId` (for a driver to find their own profile) or broader queries for available drivers (with appropriate indexing and rules).\n*   **Rides:** The `/rides/{rideId}` collection, with denormalized `userId` (rider) and `driverUserId` (driver) fields, fully supports QAPs. Riders can `list` all rides where `userId == request.auth.uid`, and drivers can `list` all rides where `driverUserId == request.auth.uid`. This enables efficient retrieval of \" "
+  }
+}
+
+    

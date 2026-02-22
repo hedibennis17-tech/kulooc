@@ -1,0 +1,327 @@
+{
+  "brand": "KULOOC",
+  "region": "CA",
+  "locale": "fr-CA",
+  "help_center": "platform",
+  "generated_at": "2026-02-22T02:25:03.795461Z",
+  "articles": [
+    {
+      "id": "KA-AUTH-001",
+      "product": "drivers",
+      "section": "Compte & application",
+      "category": "Connexion & sécurité",
+      "subCategory": "Connexion",
+      "title": "Je ne reçois pas le code SMS (OTP)",
+      "summary": "Vérifie le numéro, le réseau, et réessaie. Si besoin, utilise l’appel vocal ou change de méthode.",
+      "beforeYouStart": [
+        "Assure-toi d’avoir une connexion Internet stable (cellulaire ou Wi‑Fi).",
+        "Mets à jour KULOOC Driver si une mise à jour est disponible."
+      ],
+      "steps": [
+        "Ouvre KULOOC Driver → ‘Se connecter’.",
+        "Confirme que le numéro est correct (indicatif +1 au Canada).",
+        "Appuie ‘Renvoyer le code’ après 30–60 secondes.",
+        "Bascule en Wi‑Fi, désactive/active le mode avion, puis réessaie.",
+        "Si disponible: choisis ‘Recevoir un appel’ (OTP vocal)."
+      ],
+      "troubleshooting": [
+        "Vérifie si ton téléphone bloque les SMS inconnus ou si un filtre anti‑spam est actif.",
+        "Redémarre le téléphone, puis réessaie.",
+        "Si tu as changé de SIM récemment, attends 10–30 minutes et retente."
+      ],
+      "dataNeededForTicket": [
+        "driver_id (si connu)",
+        "phone_last4",
+        "date_time",
+        "device_os",
+        "app_version"
+      ],
+      "possibleOutcomes": [
+        "Résolution guidée (self‑serve)",
+        "Déblocage après vérification",
+        "Ticket routé à un agent spécialisé (tech/compliance)"
+      ],
+      "keywords": [
+        "otp",
+        "sms",
+        "code",
+        "connexion",
+        "login"
+      ]
+    },
+    {
+      "id": "KA-AUTH-002",
+      "product": "drivers",
+      "section": "Compte & application",
+      "category": "Connexion & sécurité",
+      "subCategory": "Connexion",
+      "title": "Le code OTP est ‘incorrect’",
+      "summary": "Le code peut expirer rapidement. Regénère un code et vérifie l’heure de ton téléphone.",
+      "beforeYouStart": [
+        "Assure-toi d’avoir une connexion Internet stable (cellulaire ou Wi‑Fi).",
+        "Mets à jour KULOOC Driver si une mise à jour est disponible."
+      ],
+      "steps": [
+        "Demande un nouveau code OTP.",
+        "Assure-toi que l’heure et le fuseau horaire du téléphone sont en automatique.",
+        "Colle le code (copier/coller) si possible pour éviter les erreurs.",
+        "Si plusieurs codes reçus: utilise le plus récent."
+      ],
+      "troubleshooting": [
+        "Désinstalle les claviers alternatifs si saisie instable.",
+        "Évite de demander trop de codes (temporisation anti‑abus)."
+      ],
+      "dataNeededForTicket": [
+        "phone_last4",
+        "error_message",
+        "date_time",
+        "device_os"
+      ],
+      "possibleOutcomes": [
+        "Résolution guidée (self‑serve)",
+        "Déblocage après vérification",
+        "Ticket routé à un agent spécialisé (tech/compliance)"
+      ],
+      "keywords": [
+        "otp incorrect",
+        "code expiré",
+        "login"
+      ]
+    },
+    {
+      "id": "KA-AUTH-003",
+      "product": "drivers",
+      "section": "Compte & application",
+      "category": "Connexion & sécurité",
+      "subCategory": "Mot de passe",
+      "title": "J’ai oublié mon mot de passe",
+      "summary": "Réinitialise depuis l’écran de connexion et vérifie tes emails/SMS.",
+      "beforeYouStart": [
+        "Assure-toi d’avoir une connexion Internet stable (cellulaire ou Wi‑Fi).",
+        "Mets à jour KULOOC Driver si une mise à jour est disponible."
+      ],
+      "steps": [
+        "Écran connexion → ‘Mot de passe oublié’.",
+        "Choisis email ou SMS selon ton compte.",
+        "Ouvre le lien de réinitialisation et définis un mot de passe fort (12+ caractères).",
+        "Reconnecte-toi et confirme que l’app a accès à Internet."
+      ],
+      "troubleshooting": [
+        "Si tu ne reçois pas le lien: vérifie indésirables/spam.",
+        "Si le lien ouvre un navigateur interne cassé: copie l’URL dans Chrome/Safari."
+      ],
+      "dataNeededForTicket": [
+        "email",
+        "phone_last4",
+        "date_time"
+      ],
+      "possibleOutcomes": [
+        "Résolution guidée (self‑serve)",
+        "Déblocage après vérification",
+        "Ticket routé à un agent spécialisé (tech/compliance)"
+      ],
+      "keywords": [
+        "reset",
+        "mot de passe",
+        "password"
+      ]
+    },
+    {
+      "id": "KA-AUTH-004",
+      "product": "drivers",
+      "section": "Compte & application",
+      "category": "Connexion & sécurité",
+      "subCategory": "Compte verrouillé",
+      "title": "Mon compte est verrouillé / en examen",
+      "summary": "Un verrouillage peut arriver après des tentatives multiples ou une vérification de sécurité.",
+      "beforeYouStart": [
+        "Assure-toi d’avoir une connexion Internet stable (cellulaire ou Wi‑Fi).",
+        "Mets à jour KULOOC Driver si une mise à jour est disponible."
+      ],
+      "steps": [
+        "Ouvre ‘Boîte de réception’ dans l’app et lis le dernier message KULOOC.",
+        "Vérifie ton email (spam inclus) pour une demande de vérification.",
+        "Si demandé: fournis une preuve d’identité (selfie + pièce).",
+        "Attends la fin du contrôle et retente la connexion."
+      ],
+      "troubleshooting": [
+        "Évite de multiplier les tentatives: cela prolonge parfois le blocage.",
+        "Assure-toi d’utiliser l’app officielle et un appareil non modifié."
+      ],
+      "dataNeededForTicket": [
+        "driver_id",
+        "email",
+        "phone_last4",
+        "last_login_time",
+        "device_id"
+      ],
+      "possibleOutcomes": [
+        "Déverrouillage après vérification",
+        "Ticket sécurité si suspicion compromission"
+      ],
+      "keywords": [
+        "compte verrouillé",
+        "en examen",
+        "security hold"
+      ]
+    },
+    {
+      "id": "KA-AUTH-005",
+      "product": "drivers",
+      "section": "Compte & application",
+      "category": "Connexion & sécurité",
+      "subCategory": "Compte dupliqué",
+      "title": "‘Compte dupliqué détecté’",
+      "summary": "Utilise un seul compte chauffeur. Connecte-toi au compte original ou fais fusionner via support.",
+      "beforeYouStart": [
+        "Assure-toi d’avoir une connexion Internet stable (cellulaire ou Wi‑Fi).",
+        "Mets à jour KULOOC Driver si une mise à jour est disponible."
+      ],
+      "steps": [
+        "Essaye de te connecter avec le même téléphone/email que lors de l’inscription.",
+        "Si tu as créé 2 comptes: arrête d’utiliser le plus récent.",
+        "Ouvre un ticket ‘Compte dupliqué’ et demande la fusion vers le compte principal."
+      ],
+      "troubleshooting": [
+        "Ne crée pas de nouveau compte: ça augmente les blocages.",
+        "Prépare des preuves: email/numéros utilisés."
+      ],
+      "dataNeededForTicket": [
+        "email(s)",
+        "phone(s)",
+        "date_time",
+        "driver_id (si connu)"
+      ],
+      "possibleOutcomes": [
+        "Fusion/fermeture du compte en double",
+        "Récupération du compte principal"
+      ],
+      "keywords": [
+        "duplicate account",
+        "compte dupliqué",
+        "fusion"
+      ]
+    },
+    {
+      "id": "KA-APP-001",
+      "product": "drivers",
+      "section": "Compte & application",
+      "category": "Téléphone & application",
+      "subCategory": "Mise à jour",
+      "title": "Mettre à jour l’app KULOOC Driver",
+      "summary": "Garde l’app à jour pour stabilité et compatibilité (Wi‑Fi et stockage recommandés).",
+      "beforeYouStart": [
+        "Assure-toi d’avoir une connexion Internet stable (cellulaire ou Wi‑Fi).",
+        "Mets à jour KULOOC Driver si une mise à jour est disponible."
+      ],
+      "steps": [
+        "Ouvre App Store/Play Store → KULOOC Driver → ‘Mettre à jour’.",
+        "Si la MAJ échoue: connecte-toi à un Wi‑Fi et libère de l’espace.",
+        "Redémarre le téléphone après la MAJ.",
+        "Rouvre l’app et reconnecte-toi si nécessaire."
+      ],
+      "troubleshooting": [
+        "Si ton OS est trop ancien: mets à jour Android/iOS ou change d’appareil.",
+        "Si l’app n’apparaît pas: vérifie région/compte store."
+      ],
+      "dataNeededForTicket": [
+        "device_os",
+        "app_version",
+        "store_error_optional",
+        "date_time"
+      ],
+      "possibleOutcomes": [
+        "MAJ réussie",
+        "Assistance technique si blocage store"
+      ],
+      "keywords": [
+        "update",
+        "mise à jour",
+        "wifi",
+        "storage"
+      ]
+    },
+    {
+      "id": "KA-BGC-001",
+      "product": "drivers",
+      "section": "Compte & application",
+      "category": "Vérifications",
+      "subCategory": "Antécédents",
+      "title": "Délais de vérification d’antécédents",
+      "summary": "Les vérifications prennent souvent quelques jours ouvrables; certaines étapes ne sont pas accélérables.",
+      "beforeYouStart": [
+        "Assure-toi d’avoir une connexion Internet stable (cellulaire ou Wi‑Fi).",
+        "Mets à jour KULOOC Driver si une mise à jour est disponible."
+      ],
+      "steps": [
+        "Ouvre Compte → Vérifications → statut.",
+        "Vérifie ton email pour un lien/une action du fournisseur.",
+        "Assure-toi que tes infos (nom, DOB, adresse) sont exactes.",
+        "Attends la fin du processus, puis réessaie ‘Passer en ligne’."
+      ],
+      "troubleshooting": [
+        "Si le statut ne bouge pas après plusieurs jours ouvrables: ouvre un ticket.",
+        "Évite de soumettre plusieurs demandes en parallèle."
+      ],
+      "dataNeededForTicket": [
+        "driver_id",
+        "status",
+        "started_at",
+        "date_time"
+      ],
+      "possibleOutcomes": [
+        "Suivi",
+        "Ticket compliance si anomalie"
+      ],
+      "keywords": [
+        "background check",
+        "délai",
+        "antécédents"
+      ]
+    },
+    {
+      "id": "KP-DISP-001",
+      "product": "drivers",
+      "section": "Trajets/Dispatch",
+      "category": "Dispatch & offres",
+      "subCategory": "Offres",
+      "title": "Je ne reçois pas d’offres alors que je suis en ligne",
+      "summary": "Vérifie tes filtres, ta zone, ton réseau et les bloqueurs (Inbox).",
+      "beforeYouStart": [
+        "Assure-toi que l’app est à jour et que ta connexion Internet est stable.",
+        "Si un ‘bloqueur’ apparaît, suis l’action proposée avant de réessayer."
+      ],
+      "steps": [
+        "Accueil → confirme ‘En ligne’.",
+        "Désactive les filtres (types de trajets/destination) et réessaie.",
+        "Bouge vers une zone plus active.",
+        "Ouvre Inbox → vérifie s’il y a une action requise.",
+        "Diagnostics → tester réseau + notifications."
+      ],
+      "troubleshooting": [
+        "Déconnecte/reconnecte si tu viens d’être approuvé.",
+        "Si tu es dans une file (aéroport): évite de rejeter trop d’offres."
+      ],
+      "dataNeededForTicket": [
+        "driver_id",
+        "city",
+        "date_time",
+        "filters_status_optional",
+        "network_type",
+        "app_version"
+      ],
+      "possibleOutcomes": [
+        "Explication + conseils",
+        "Ajustement de paramètres",
+        "Escalade marketplace/dispatch"
+      ],
+      "keywords": [
+        "offres",
+        "dispatch",
+        "aucune demande",
+        "online"
+      ],
+      "tags": []
+    }
+  ]
+}

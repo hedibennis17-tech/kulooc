@@ -1,0 +1,203 @@
+{
+  "brand": "KULOOC",
+  "region": "CA",
+  "locales": [
+    "fr-CA"
+  ],
+  "theme": {
+    "primary": "#D80621",
+    "background": "#FFFFFF",
+    "accent": "maple_leaf"
+  },
+  "hubs": [
+    {
+      "key": "riders",
+      "label": "Passagers",
+      "sections": [
+        {
+          "key": "trips",
+          "label": "Trajets",
+          "children": [
+            "requesting",
+            "pickup",
+            "during_trip",
+            "after_trip",
+            "cancellations",
+            "fare_review",
+            "lost_items",
+            "safety"
+          ]
+        },
+        {
+          "key": "orders",
+          "label": "Commandes (Delivery)",
+          "children": [
+            "placing",
+            "tracking",
+            "missing_wrong",
+            "delays",
+            "refunds",
+            "courier_issues"
+          ]
+        },
+        {
+          "key": "account",
+          "label": "Compte & paiement",
+          "children": [
+            "sign_in",
+            "payment_methods",
+            "receipts",
+            "promos_wallet",
+            "privacy"
+          ]
+        },
+        {
+          "key": "chat",
+          "label": "Chat & communication",
+          "children": [
+            "chat",
+            "calls",
+            "notifications"
+          ]
+        }
+      ]
+    },
+    {
+      "key": "drivers",
+      "label": "Chauffeurs & livraisons",
+      "sections": [
+        {
+          "key": "go_online",
+          "label": "Passer en ligne",
+          "children": [
+            "blockers",
+            "network",
+            "gps",
+            "version_os",
+            "account_hold",
+            "time_limits",
+            "device_integrity"
+          ]
+        },
+        {
+          "key": "dispatch",
+          "label": "Dispatch & offres",
+          "children": [
+            "exclusive_offers",
+            "offer_list",
+            "auto_accept",
+            "airport_queue",
+            "filters"
+          ]
+        },
+        {
+          "key": "trips_driver",
+          "label": "Trajets (chauffeur)",
+          "children": [
+            "pickup",
+            "navigation",
+            "statuses",
+            "cancellations",
+            "incidents",
+            "payments"
+          ]
+        },
+        {
+          "key": "orders_driver",
+          "label": "Commandes (livraison)",
+          "children": [
+            "pickup",
+            "dropoff",
+            "pod",
+            "cancellations",
+            "merchant_issues",
+            "customer_issues"
+          ]
+        },
+        {
+          "key": "account_app",
+          "label": "Compte & application",
+          "children": [
+            "auth",
+            "documents",
+            "vehicles",
+            "background_checks",
+            "app_issues",
+            "inbox"
+          ]
+        },
+        {
+          "key": "earnings",
+          "label": "Gains",
+          "children": [
+            "payouts",
+            "tips",
+            "promos",
+            "statements",
+            "taxes_ca"
+          ]
+        },
+        {
+          "key": "safety",
+          "label": "Sécurité",
+          "children": [
+            "emergency",
+            "incidents",
+            "accidents",
+            "harassment",
+            "tools"
+          ]
+        }
+      ]
+    }
+  ],
+  "kb_files": [
+    {
+      "file": "kulooc_platform_kb_fr-ca.json",
+      "count": 270
+    }
+  ],
+  "search": {
+    "autocomplete": true,
+    "filters": [
+      "hub",
+      "section",
+      "city",
+      "status"
+    ],
+    "synonyms": [
+      {
+        "q": "dispatch",
+        "syn": [
+          "offre",
+          "matching",
+          "assignation"
+        ]
+      },
+      {
+        "q": "trajet",
+        "syn": [
+          "course",
+          "ride",
+          "trip"
+        ]
+      },
+      {
+        "q": "commande",
+        "syn": [
+          "livraison",
+          "order",
+          "delivery"
+        ]
+      },
+      {
+        "q": "chat",
+        "syn": [
+          "message",
+          "appel",
+          "communication"
+        ]
+      }
+    ]
+  }
+}
