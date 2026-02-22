@@ -55,3 +55,46 @@ export async function autocompleteAddress(input: string): Promise<AutocompleteRe
     return { success: false, error: errorMessage };
   }
 }
+
+const GEOCODE_API_URL = 'https://maps.googleapis.com/maps/api/geocode/json';
+
+export type ReverseGeocodeResponse = {
+  success: true;
+  address: string;
+} | {
+  success: false;
+  error: string;
+};
+
+export async function reverseGeocode(lat: number, lng: number): Promise<ReverseGeocodeResponse> {
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
+  if (!apiKey) {
+    const error = 'Google Maps API key is missing';
+    console.error(error);
+    return { success: false, error };
+  }
+
+  const url = `${GEOCODE_API_URL}?latlng=${lat},${lng}&key=${apiKey}&language=fr`;
+
+  try {
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if (data.status !== 'OK') {
+      const error = data.error_message || `Geocoding API error: ${data.status}`;
+      console.error(error);
+      return { success: false, error };
+    }
+
+    const address = data.results[0]?.formatted_address;
+    if (!address) {
+      return { success: false, error: 'No address found' };
+    }
+
+    return { success: true, address };
+  } catch (error) {
+    const errorMessage = 'Error fetching reverse geocode.';
+    console.error(errorMessage, error);
+    return { success: false, error: errorMessage };
+  }
+}
