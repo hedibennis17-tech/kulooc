@@ -160,8 +160,9 @@ service cloud.firestore {
     match /rides/{rideId} {
       allow get: if isRideParticipant(resource.data);
       allow list: if false;
-      allow create: if isRideCreator(request.resource.data);
-      allow update: if isExistingDoc() && isRideParticipant(resource.data) && isImmutable('userId') && isImmutable('driverUserId');
+      // Permettre la création si l'utilisateur est authentifié et que userId correspond
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isExistingDoc() && isRideParticipant(resource.data);
       allow delete: if isExistingDoc() && isRideParticipant(resource.data);
     }
 
