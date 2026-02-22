@@ -29,6 +29,18 @@ export function getSdks(firebaseApp: FirebaseApp) {
   };
 }
 
+// Export db singleton for use in services
+import { getApps as _getApps, getApp as _getApp } from 'firebase/app';
+function _getFirestore() {
+  try {
+    const app = _getApps().length ? _getApp() : initializeApp(firebaseConfig);
+    return getFirestore(app);
+  } catch {
+    return getFirestore(_getApp());
+  }
+}
+export const db = _getFirestore();
+
 export * from './provider';
 export * from './client-provider';
 export * from './firestore/use-collection';

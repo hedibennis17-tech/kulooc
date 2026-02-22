@@ -228,5 +228,65 @@ service cloud.firestore {
       allow get, list: if true;
       allow create, update, delete: if false;
     }
+
+    // ── ride_requests ─────────────────────────────────────────────────────────
+    // Demandes de course créées par les passagers — visibles par passager + chauffeurs
+    match /ride_requests/{requestId} {
+      allow create: if isSignedIn();
+      allow read: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isSignedIn() && resource.data.passengerId == request.auth.uid;
+    }
+
+    // ── active_rides ──────────────────────────────────────────────────────────
+    // Courses actives — accessibles par passager ET chauffeur
+    match /active_rides/{rideId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if false;
+    }
+
+    // ── completed_rides ───────────────────────────────────────────────────────
+    // Historique des courses terminées
+    match /completed_rides/{rideId} {
+      allow read: if isSignedIn() && (
+        resource.data.passengerId == request.auth.uid ||
+        resource.data.driverId == request.auth.uid
+      );
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // ── zones ─────────────────────────────────────────────────────────────────
+    // Zones géographiques et métriques de surge
+    match /zones/{zoneId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ── system_config ─────────────────────────────────────────────────────────
+    // Configuration globale du système (tarifs, dispatch, etc.)
+    match /system_config/{configId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
+    // ── ratings ───────────────────────────────────────────────────────────────
+    // Évaluations post-course
+    match /ratings/{ratingId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if false;
+    }
+
+    // ── notifications ─────────────────────────────────────────────────────────
+    // Notifications push
+    match /notifications/{notifId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn();
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+    }
   }
 }
