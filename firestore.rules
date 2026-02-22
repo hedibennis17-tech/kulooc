@@ -288,5 +288,18 @@ service cloud.firestore {
       allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
+
+    // ── admin_users ───────────────────────────────────────────────────────────
+    // Utilisateurs admin - accès restreint aux utilisateurs authentifiés
+    match /admin_users/{userId} {
+      // Lecture : utilisateur connecté peut lire son propre document
+      allow get: if isSignedIn() && request.auth.uid == userId;
+      // Liste : bloqué pour tout le monde
+      allow list: if false;
+      // Création/Mise à jour : utilisateur connecté peut créer/modifier son propre document
+      allow create, update: if isSignedIn() && request.auth.uid == userId;
+      // Suppression : bloquée pour tout le monde (seul un admin backend peut supprimer)
+      allow delete: if false;
+    }
   }
 }
