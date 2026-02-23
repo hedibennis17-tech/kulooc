@@ -33,23 +33,74 @@ export default function ClientAccountPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [profile, setProfile] = useState<any>(null);
+  const [isProfileLoading, setIsProfileLoading] = useState(true);
   const [isEditing, setIsEditing] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [form, setForm] = useState({ displayName: '', phoneNumber: '', homeAddress: '', workAddress: '' });
 
   useEffect(() => {
     if (user) {
-      getClientProfile(user.uid).then(p => {
-        if (p) {
-          setProfile(p);
+      setIsProfileLoading(true);
+      getClientProfile(user.uid)
+        .then(p => {
+          if (p) {
+            setProfile(p);
+            setForm({
+              displayName: p.displayName || '',
+              phoneNumber: p.phoneNumber || '',
+              homeAddress: p.homeAddress || '',
+              workAddress: p.workAddress || '',
+            });
+          } else {
+            // Profil inexistant : utiliser les infos Firebase Auth directement
+            const fallback = {
+              uid: user.uid,
+              displayName: user.displayName || user.email?.split('@')[0] || 'Utilisateur',
+              email: user.email || '',
+              phoneNumber: user.phoneNumber || '',
+              photoURL: user.photoURL || '',
+              totalRides: 0,
+              totalSpent: 0,
+              rating: 5,
+              tier: 'regular',
+              homeAddress: '',
+              workAddress: '',
+            };
+            setProfile(fallback);
+            setForm({
+              displayName: fallback.displayName,
+              phoneNumber: fallback.phoneNumber,
+              homeAddress: '',
+              workAddress: '',
+            });
+          }
+        })
+        .catch(() => {
+          // En cas d'erreur Firestore, afficher quand même avec les données Auth
+          const fallback = {
+            uid: user.uid,
+            displayName: user.displayName || user.email?.split('@')[0] || 'Utilisateur',
+            email: user.email || '',
+            phoneNumber: user.phoneNumber || '',
+            photoURL: user.photoURL || '',
+            totalRides: 0,
+            totalSpent: 0,
+            rating: 5,
+            tier: 'regular',
+            homeAddress: '',
+            workAddress: '',
+          };
+          setProfile(fallback);
           setForm({
-            displayName: p.displayName || '',
-            phoneNumber: p.phoneNumber || '',
-            homeAddress: p.homeAddress || '',
-            workAddress: p.workAddress || '',
+            displayName: fallback.displayName,
+            phoneNumber: fallback.phoneNumber,
+            homeAddress: '',
+            workAddress: '',
           });
-        }
-      });
+        })
+        .finally(() => setIsProfileLoading(false));
+    } else {
+      setIsProfileLoading(false);
     }
   }, [user]);
 
@@ -73,10 +124,19 @@ export default function ClientAccountPage() {
     router.push('/login');
   };
 
-  if (!user || !profile) {
+  if (isProfileLoading) {
     return (
       <div className="flex items-center justify-center h-48">
         <Loader2 className="w-6 h-6 animate-spin text-gray-400" />
+      </div>
+    );
+  }
+
+  if (!user || !profile) {
+    return (
+      <div className="flex flex-col items-center justify-center h-48 gap-3">
+        <User className="w-10 h-10 text-gray-300" />
+        <p className="text-gray-400 text-sm">Connectez-vous pour voir votre compte</p>
       </div>
     );
   }
