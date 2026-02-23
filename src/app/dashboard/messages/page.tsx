@@ -37,8 +37,12 @@ export default function MessagesPage() {
   const [newMessage, setNewMessage] = useState('');
   const [search, setSearch] = useState('');
   const [isSending, setIsSending] = useState(false);
+  const [isMounted, setIsMounted] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  // Fix React #418 hydration mismatch — ne pas rendre les dates avant montage client
+  useEffect(() => { setIsMounted(true); }, []);
 
   useEffect(() => {
     const unsub = onSnapshot(
@@ -84,11 +88,14 @@ export default function MessagesPage() {
     : messages;
 
   const formatTime = (ts: any) => {
-    if (!ts?.toDate) return '';
-    const d = ts.toDate();
-    const now = new Date();
-    if (d.toDateString() === now.toDateString()) return d.toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' });
-    return d.toLocaleDateString('fr-CA', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    if (!isMounted || !ts?.toDate) return '';
+    try {
+      const d = ts.toDate();
+      const now = new Date();
+      if (d.toDateString() === now.toDateString())
+        return d.toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' });
+      return d.toLocaleDateString('fr-CA', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+    } catch { return ''; }
   };
 
   const roleColors: Record<string, string> = {

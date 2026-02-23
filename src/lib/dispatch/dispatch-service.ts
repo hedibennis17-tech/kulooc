@@ -216,19 +216,32 @@ export function subscribeToActiveRides(
   db: ReturnType<typeof import('firebase/firestore').getFirestore>,
   callback: (rides: ActiveRide[]) => void
 ): Unsubscribe {
+  // Query sans orderBy pour éviter l'index composite manquant rides(status+assignedAt)
+  // Le tri est effectué côté client après réception
   const q = query(
     collection(db, 'rides'),
     where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress']),
-    orderBy('assignedAt', 'desc'),
     limit(100)
   );
-  return onSnapshot(q, (snapshot) => {
-    const rides: ActiveRide[] = snapshot.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as Omit<ActiveRide, 'id'>),
-    }));
-    callback(rides);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const rides: ActiveRide[] = snapshot.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<ActiveRide, 'id'>) }))
+        // Tri côté client par assignedAt décroissant
+        .sort((a: any, b: any) => {
+          const aTime = a.assignedAt?.toMillis?.() ?? 0;
+          const bTime = b.assignedAt?.toMillis?.() ?? 0;
+          return bTime - aTime;
+        });
+      callback(rides);
+    },
+    (err) => {
+      // En cas d'erreur Firestore, retourner tableau vide sans bloquer l'UI
+      console.warn('subscribeToActiveRides error (ignoré):', err.message);
+      callback([]);
+    }
+  );
 }
 
 export function subscribeToZoneMetrics(
