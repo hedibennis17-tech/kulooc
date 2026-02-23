@@ -27,19 +27,12 @@ export function useAdminAuth(): AdminAuthState {
   });
 
   useEffect(() => {
-    console.log('[useAdminAuth] isUserLoading:', isUserLoading, 'user:', user?.email);
-    
-    // Timeout de sécurité : si après 10 secondes on est toujours en loading, on force l'erreur
     const timeout = setTimeout(() => {
       setState(prev => {
         if (prev.isLoading) {
-          console.error('[useAdminAuth] TIMEOUT - Firebase ne répond pas');
           return {
-            adminUser: null,
-            role: null,
-            permissions: null,
-            isLoading: false,
-            isAuthorized: false,
+            adminUser: null, role: null, permissions: null,
+            isLoading: false, isAuthorized: false,
             error: 'Erreur de connexion Firebase - Timeout',
           };
         }
@@ -51,41 +44,36 @@ export function useAdminAuth(): AdminAuthState {
 
     if (!user) {
       clearTimeout(timeout);
-      console.log('[useAdminAuth] Pas d\'utilisateur connecté');
       setState({
-        adminUser: null,
-        role: null,
-        permissions: null,
-        isLoading: false,
-        isAuthorized: false,
-        error: 'Non connecté',
+        adminUser: null, role: null, permissions: null,
+        isLoading: false, isAuthorized: false, error: 'Non connecté',
       });
       return;
     }
 
     const checkAdminRole = async () => {
       try {
-        console.log('[useAdminAuth] Checking admin role for:', user.email);
-        // Super admin automatique pour hedibennis17@gmail.com
+        // ── Super Admin : accès immédiat sans dépendre des règles Firestore ──
         if (user.email === SUPER_ADMIN_EMAIL) {
-          console.log('[useAdminAuth] Super admin detected!');
           clearTimeout(timeout);
           const adminUser: AdminUser = {
             uid: user.uid,
             email: user.email!,
-            name: user.displayName || 'Super Admin',
+            name: user.displayName || 'HEDI BENNIS',
             role: 'super_admin',
             avatar: user.photoURL || undefined,
             createdAt: new Date(),
             isActive: true,
           };
 
-          // Sauvegarder/mettre à jour dans Firestore
-          await setDoc(doc(db, 'admin_users', user.uid), {
+          // Mettre à jour Firestore en arrière-plan (silencieux si erreur de permission)
+          setDoc(doc(db, 'admin_users', user.uid), {
             ...adminUser,
             role: 'super_admin',
             lastLogin: serverTimestamp(),
-          }, { merge: true });
+          }, { merge: true }).catch(() => {
+            // Ignoré — le document existe déjà dans Firestore via Admin SDK
+          });
 
           setState({
             adminUser,
@@ -95,20 +83,17 @@ export function useAdminAuth(): AdminAuthState {
             isAuthorized: true,
             error: null,
           });
-          console.log('[useAdminAuth] Super admin state set successfully');
           return;
         }
 
-        // Vérifier le rôle dans Firestore pour les autres utilisateurs
+        // ── Autres utilisateurs : vérifier le rôle dans Firestore ──
         const adminDoc = await getDoc(doc(db, 'admin_users', user.uid));
 
         if (!adminDoc.exists()) {
+          clearTimeout(timeout);
           setState({
-            adminUser: null,
-            role: null,
-            permissions: null,
-            isLoading: false,
-            isAuthorized: false,
+            adminUser: null, role: null, permissions: null,
+            isLoading: false, isAuthorized: false,
             error: 'Accès refusé — Vous n\'avez pas les permissions admin',
           });
           return;
@@ -118,12 +103,10 @@ export function useAdminAuth(): AdminAuthState {
         const role = data.role as AdminRole;
 
         if (!data.isActive) {
+          clearTimeout(timeout);
           setState({
-            adminUser: null,
-            role: null,
-            permissions: null,
-            isLoading: false,
-            isAuthorized: false,
+            adminUser: null, role: null, permissions: null,
+            isLoading: false, isAuthorized: false,
             error: 'Compte admin désactivé',
           });
           return;
@@ -139,11 +122,12 @@ export function useAdminAuth(): AdminAuthState {
           isActive: data.isActive,
         };
 
-        // Mettre à jour lastLogin
-        await setDoc(doc(db, 'admin_users', user.uid), {
+        // Mettre à jour lastLogin en arrière-plan
+        setDoc(doc(db, 'admin_users', user.uid), {
           lastLogin: serverTimestamp(),
-        }, { merge: true });
+        }, { merge: true }).catch(() => {});
 
+        clearTimeout(timeout);
         setState({
           adminUser,
           role,
@@ -152,22 +136,17 @@ export function useAdminAuth(): AdminAuthState {
           isAuthorized: true,
           error: null,
         });
-      } catch (err: any) {
-        console.error('[useAdminAuth] Error:', err);
+      } catch (err: unknown) {
         clearTimeout(timeout);
         setState({
-          adminUser: null,
-          role: null,
-          permissions: null,
-          isLoading: false,
-          isAuthorized: false,
-          error: err.message,
+          adminUser: null, role: null, permissions: null,
+          isLoading: false, isAuthorized: false,
+          error: err instanceof Error ? err.message : 'Erreur inconnue',
         });
       }
     };
 
     checkAdminRole();
-    
     return () => clearTimeout(timeout);
   }, [user, isUserLoading]);
 
