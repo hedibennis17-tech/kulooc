@@ -63,6 +63,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const { adminUser, role, isLoading, isAuthorized, error } = useAdminAuth();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
   const [currentDate, setCurrentDate] = useState('');
 
   // Fix React #418 — date uniquement côté client
