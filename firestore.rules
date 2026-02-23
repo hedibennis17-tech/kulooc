@@ -303,6 +303,19 @@ service cloud.firestore {
       allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
     }
 
+    // ── driver_documents ──────────────────────────────────────────────────────
+    // Documents des chauffeurs (permis, assurance, etc.)
+    match /driver_documents/{documentId} {
+      // Lecture : chauffeur propriétaire du document
+      allow read: if isSignedIn() && resource.data.driverId == request.auth.uid;
+      // Création : chauffeur authentifié peut créer ses propres documents
+      allow create: if isSignedIn() && request.resource.data.driverId == request.auth.uid;
+      // Mise à jour : chauffeur propriétaire uniquement
+      allow update: if isSignedIn() && resource.data.driverId == request.auth.uid;
+      // Suppression : chauffeur propriétaire uniquement
+      allow delete: if isSignedIn() && resource.data.driverId == request.auth.uid;
+    }
+
     // ── admin_users ───────────────────────────────────────────────────────────
     // Utilisateurs admin - accès restreint aux utilisateurs authentifiés
     match /admin_users/{userId} {

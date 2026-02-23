@@ -1,0 +1,81 @@
+rules_version = '2';
+
+// Firebase Storage Security Rules
+service firebase.storage {
+  match /b/{bucket}/o {
+    
+    // Fonction helper pour vérifier si l'utilisateur est authentifié
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+    
+    // Fonction helper pour vérifier si l'utilisateur est le propriétaire
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+    
+    // Fonction helper pour vérifier la taille du fichier (max 10MB)
+    function isValidSize() {
+      return request.resource.size < 10 * 1024 * 1024;
+    }
+    
+    // Fonction helper pour vérifier le type de fichier (images et PDF)
+    function isValidFileType() {
+      return request.resource.contentType.matches('image/.*') ||
+             request.resource.contentType == 'application/pdf';
+    }
+    
+    // ── drivers/{driverId}/profile-photo.jpg ──────────────────────────────────
+    // Photo de profil du chauffeur
+    match /drivers/{driverId}/profile-photo.jpg {
+      // Lecture : Tous les utilisateurs authentifiés
+      allow read: if isAuthenticated();
+      
+      // Écriture : Propriétaire uniquement + validation
+      allow write: if isOwner(driverId) && 
+                      isValidSize() && 
+                      request.resource.contentType.matches('image/.*');
+    }
+    
+    // ── drivers/{driverId}/documents/{documentName} ───────────────────────────
+    // Documents du chauffeur (permis, assurance, etc.)
+    match /drivers/{driverId}/documents/{documentName} {
+      // Lecture : Propriétaire uniquement
+      allow read: if isOwner(driverId);
+      
+      // Écriture : Propriétaire uniquement + validation
+      allow write: if isOwner(driverId) && 
+                      isValidSize() && 
+                      isValidFileType();
+    }
+    
+    // ── users/{userId}/profile-photo.jpg ──────────────────────────────────────
+    // Photo de profil du passager
+    match /users/{userId}/profile-photo.jpg {
+      // Lecture : Tous les utilisateurs authentifiés
+      allow read: if isAuthenticated();
+      
+      // Écriture : Propriétaire uniquement + validation
+      allow write: if isOwner(userId) && 
+                      isValidSize() && 
+                      request.resource.contentType.matches('image/.*');
+    }
+    
+    // ── users/{userId}/documents/{documentName} ───────────────────────────────
+    // Documents du passager
+    match /users/{userId}/documents/{documentName} {
+      // Lecture : Propriétaire uniquement
+      allow read: if isOwner(userId);
+      
+      // Écriture : Propriétaire uniquement + validation
+      allow write: if isOwner(userId) && 
+                      isValidSize() && 
+                      isValidFileType();
+    }
+    
+    // Par défaut: Tout refuser
+    match /{allPaths=**} {
+      allow read, write: if false;
+    }
+  }
+}
