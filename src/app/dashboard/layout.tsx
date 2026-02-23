@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useAdminAuth } from '@/lib/admin/use-admin-auth';
@@ -61,8 +61,16 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
   const auth = useAuth();
   const { adminUser, role, isLoading, isAuthorized, error } = useAdminAuth();
-  const [collapsed, setCollapsed] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [currentDate, setCurrentDate] = useState('');
+
+  // Fix React #418 — date uniquement côté client
+  useEffect(() => {
+    setCurrentDate(
+      new Date().toLocaleDateString('fr-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })
+    );
+  }, []);
   const [notifications] = useState(3);
   const [unreadMessages] = useState(5);
 
@@ -236,7 +244,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
                 {navItems.find(n => isActive(n.href, n.exact))?.label || 'Dashboard'}
               </h1>
               <p className="text-gray-500 text-xs">
-                {new Date().toLocaleDateString('fr-CA', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' })}
+                <span suppressHydrationWarning>{currentDate}</span>
               </p>
             </div>
           </div>

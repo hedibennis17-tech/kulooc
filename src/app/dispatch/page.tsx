@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -46,6 +46,20 @@ export default function DispatcherDashboardPage() {
   const [selectedDriver, setSelectedDriver] = useState<DispatchDriver | null>(null);
   const [selectedRequest, setSelectedRequest] = useState<RideRequest | null>(null);
   const [activeTab, setActiveTab] = useState('requests');
+  const [currentTime, setCurrentTime] = useState('');
+
+  // Fix React #418 — horloge uniquement côté client
+  useEffect(() => {
+    const update = () => setCurrentTime(
+      new Date().toLocaleString('fr-CA', {
+        weekday: 'short', month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit',
+      })
+    );
+    update();
+    const timer = setInterval(update, 30000);
+    return () => clearInterval(timer);
+  }, []);
 
   const handleDriverClick = useCallback((driver: DispatchDriver) => {
     setSelectedDriver(driver);
@@ -111,14 +125,8 @@ export default function DispatcherDashboardPage() {
                 {isLoading ? 'Chargement...' : '⚡ Charger données démo'}
               </Button>
             )}
-            <div className="text-xs text-muted-foreground bg-white dark:bg-gray-900 border rounded-lg px-3 py-1.5">
-              {new Date().toLocaleString('fr-CA', {
-                weekday: 'short',
-                month: 'short',
-                day: 'numeric',
-                hour: '2-digit',
-                minute: '2-digit',
-              })}
+            <div suppressHydrationWarning className="text-xs text-muted-foreground bg-white dark:bg-gray-900 border rounded-lg px-3 py-1.5">
+              {currentTime}
             </div>
           </div>
         </div>
