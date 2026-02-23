@@ -42,9 +42,19 @@ function formatDuration(seconds: number): string {
 }
 
 export default function DriverHomePage() {
-  const { user } = useUser();
+  const { user, loading: userLoading } = useUser();
   const { toast } = useToast();
   const router = useRouter();
+
+  // Rediriger vers auth si non connecté
+  if (!userLoading && !user) {
+    router.push('/driver/auth');
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="h-12 w-12 animate-spin text-red-600" />
+      </div>
+    );
+  }
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   const [selectedRequest, setSelectedRequest] = useState<RideRequest | null>(null);
