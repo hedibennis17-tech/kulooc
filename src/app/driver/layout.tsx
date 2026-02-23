@@ -1,51 +1,53 @@
-import { Home, User, Wallet, Inbox, LifeBuoy } from 'lucide-react';
+'use client';
+import { Home, DollarSign, Mail, Menu } from 'lucide-react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
+import { cn } from '@/lib/utils';
 
-export default function DriverLayout({
-  children,
-}: {
-  children: React.ReactNode;
-}) {
+const navItems = [
+  { href: '/driver', label: 'Accueil', icon: Home },
+  { href: '/driver/earnings', label: 'Revenus', icon: DollarSign },
+  { href: '/driver/inbox', label: 'Boîte de récep.', icon: Mail },
+  { href: '/driver/menu', label: 'Menu', icon: Menu },
+];
+
+export default function DriverLayout({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname();
+
+  // Pages sans navigation (onboarding, auth, login)
+  const noNavPages = ['/driver/onboarding', '/driver/auth', '/driver/login', '/driver/signup'];
+  const showNav = !noNavPages.some(p => pathname.startsWith(p));
+
   return (
-    <div className="flex flex-col h-screen bg-background font-sans">
-      <header className="bg-white shadow-sm p-4 flex items-center justify-between z-10 border-b">
-        <Link href="/driver" className="text-2xl font-bold tracking-tighter text-primary">
-          KULOOC 🍁
-        </Link>
-        <div className="flex items-center gap-2">
-            <Link href="/driver/inbox">
-                <button className="p-2 rounded-full hover:bg-muted">
-                    <Inbox className="h-6 w-6 text-gray-700" />
-                </button>
-            </Link>
-             <Link href="/help">
-                <button className="p-2 rounded-full hover:bg-muted">
-                    <LifeBuoy className="h-6 w-6 text-gray-700" />
-                </button>
-            </Link>
-        </div>
-      </header>
-
-      <main className="flex-1 overflow-y-auto bg-gray-50">
+    <div className="flex flex-col min-h-screen bg-white font-sans max-w-md mx-auto relative">
+      <main className={cn('flex-1 overflow-y-auto', showNav ? 'pb-20' : '')}>
         {children}
       </main>
 
-      <nav className="bg-white border-t shadow-t-lg">
-        <div className="container mx-auto px-4 h-16 flex items-center justify-around">
-          <Link href="/driver" className="flex flex-col items-center justify-center text-gray-600 hover:text-primary">
-            <Home className="h-6 w-6" />
-            <span className="text-xs font-medium">Accueil</span>
-          </Link>
-          <Link href="#" className="flex flex-col items-center justify-center text-gray-600 hover:text-primary">
-            <Wallet className="h-6 w-6" />
-            <span className="text-xs font-medium">Gains</span>
-          </Link>
-          <Link href="/driver/account" className="flex flex-col items-center justify-center text-gray-600 hover:text-primary">
-            <User className="h-6 w-6" />
-            <span className="text-xs font-medium">Compte</span>
-          </Link>
-        </div>
-      </nav>
+      {showNav && (
+        <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-200 z-50">
+          <div className="flex items-center justify-around h-16">
+            {navItems.map(({ href, label, icon: Icon }) => {
+              const isActive = href === '/driver' ? pathname === '/driver' : pathname.startsWith(href);
+              return (
+                <Link
+                  key={href}
+                  href={href}
+                  className={cn(
+                    'flex flex-col items-center justify-center gap-0.5 flex-1 h-full transition-colors',
+                    isActive ? 'text-black' : 'text-gray-400'
+                  )}
+                >
+                  <Icon className={cn('h-6 w-6', isActive ? 'stroke-[2.5px]' : 'stroke-[1.5px]')} />
+                  <span className={cn('text-xs', isActive ? 'font-bold' : 'font-normal')}>
+                    {label}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+        </nav>
+      )}
     </div>
   );
 }
