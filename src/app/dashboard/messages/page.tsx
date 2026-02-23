@@ -2,13 +2,12 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { db } from '@/firebase';
-import { collection, query, orderBy, limit, addDoc, onSnapshot, serverTimestamp, getDocs, where } from 'firebase/firestore';
+import { collection, query, limit, addDoc, onSnapshot, serverTimestamp, where } from 'firebase/firestore';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Badge } from '@/components/ui/badge';
-import { MessageCircle, Send, Users, Search, Bell } from 'lucide-react';
+import { MessageCircle, Send, Search } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useToast } from '@/hooks/use-toast';
 
@@ -41,24 +40,41 @@ export default function MessagesPage() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  // Fix React #418 hydration mismatch — ne pas rendre les dates avant montage client
+  // Fix React #418 — monter côté client uniquement
   useEffect(() => { setIsMounted(true); }, []);
 
   useEffect(() => {
+    if (!isMounted) return;
+
+    // SANS orderBy pour éviter l'index composite manquant messages(channel+createdAt)
+    // Tri effectué côté client après réception
+    const q = query(
+      collection(db, 'messages'),
+      where('channel', '==', activeChannel),
+      limit(100)
+    );
+
     const unsub = onSnapshot(
-      query(
-        collection(db, 'messages'),
-        where('channel', '==', activeChannel),
-        orderBy('createdAt', 'asc'),
-        limit(100)
-      ),
+      q,
       (snap) => {
-        setMessages(snap.docs.map(d => ({ id: d.id, ...d.data() } as Message)));
+        const msgs = snap.docs
+          .map(d => ({ id: d.id, ...d.data() } as Message))
+          // Tri côté client par createdAt croissant
+          .sort((a, b) => {
+            const aTime = a.createdAt?.toMillis?.() ?? 0;
+            const bTime = b.createdAt?.toMillis?.() ?? 0;
+            return aTime - bTime;
+          });
+        setMessages(msgs);
         setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' }), 100);
+      },
+      (err) => {
+        console.warn('messages snapshot error (ignoré):', err.message);
+        setMessages([]);
       }
     );
     return () => unsub();
-  }, [activeChannel]);
+  }, [activeChannel, isMounted]);
 
   const sendMessage = async () => {
     if (!newMessage.trim()) return;
@@ -84,10 +100,14 @@ export default function MessagesPage() {
   };
 
   const filteredMessages = search
-    ? messages.filter(m => m.content.toLowerCase().includes(search.toLowerCase()) || m.senderName.toLowerCase().includes(search.toLowerCase()))
+    ? messages.filter(m =>
+        m.content.toLowerCase().includes(search.toLowerCase()) ||
+        m.senderName.toLowerCase().includes(search.toLowerCase())
+      )
     : messages;
 
-  const formatTime = (ts: any) => {
+  // Formatage des dates uniquement côté client (fix React #418)
+  const formatTime = (ts: any): string => {
     if (!isMounted || !ts?.toDate) return '';
     try {
       const d = ts.toDate();
@@ -105,6 +125,21 @@ export default function MessagesPage() {
     'Dispatcher': 'text-green-400',
     'Driver': 'text-yellow-400',
   };
+
+  // Attendre le montage côté client avant de rendre quoi que ce soit (fix React #418)
+  if (!isMounted) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Messagerie Interne</h1>
+          <p className="text-gray-400 text-sm mt-1">Chargement...</p>
+        </div>
+        <div className="flex items-center justify-center h-64">
+          <div className="w-8 h-8 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-4">
@@ -125,7 +160,9 @@ export default function MessagesPage() {
                   onClick={() => setActiveChannel(ch.id)}
                   className={cn(
                     'w-full flex items-center gap-3 px-3 py-2 rounded-lg text-left transition-all',
-                    activeChannel === ch.id ? 'bg-gray-700 text-white' : 'text-gray-400 hover:bg-gray-800 hover:text-white'
+                    activeChannel === ch.id
+                      ? 'bg-gray-700 text-white'
+                      : 'text-gray-400 hover:bg-gray-800 hover:text-white'
                   )}
                 >
                   <span className="text-base">{ch.icon}</span>
@@ -143,7 +180,9 @@ export default function MessagesPage() {
             <div className="flex items-center gap-2">
               <span className="text-lg">{CHANNELS.find(c => c.id === activeChannel)?.icon}</span>
               <div>
-                <p className="text-white font-medium text-sm">{CHANNELS.find(c => c.id === activeChannel)?.label}</p>
+                <p className="text-white font-medium text-sm">
+                  {CHANNELS.find(c => c.id === activeChannel)?.label}
+                </p>
                 <p className="text-gray-400 text-xs">{messages.length} messages</p>
               </div>
             </div>
@@ -170,7 +209,12 @@ export default function MessagesPage() {
               filteredMessages.map(msg => (
                 <div key={msg.id} className={cn('flex gap-3', msg.senderId === 'admin' && 'flex-row-reverse')}>
                   <Avatar className="w-8 h-8 flex-shrink-0">
-                    <AvatarFallback className={cn('text-white text-xs', msg.senderId === 'admin' ? 'bg-red-700' : 'bg-gray-700')}>
+                    <AvatarFallback
+                      className={cn(
+                        'text-white text-xs',
+                        msg.senderId === 'admin' ? 'bg-red-700' : 'bg-gray-700'
+                      )}
+                    >
                       {msg.senderName.charAt(0).toUpperCase()}
                     </AvatarFallback>
                   </Avatar>
@@ -179,7 +223,10 @@ export default function MessagesPage() {
                       <span className={cn('text-xs font-medium', roleColors[msg.senderRole] || 'text-gray-400')}>
                         {msg.senderName}
                       </span>
-                      <span className="text-gray-600 text-xs">{formatTime(msg.createdAt)}</span>
+                      {/* suppressHydrationWarning sur le span de la date */}
+                      <span suppressHydrationWarning className="text-gray-600 text-xs">
+                        {formatTime(msg.createdAt)}
+                      </span>
                     </div>
                     <div className={cn(
                       'rounded-2xl px-3 py-2 text-sm',
@@ -204,17 +251,17 @@ export default function MessagesPage() {
                 value={newMessage}
                 onChange={e => setNewMessage(e.target.value)}
                 onKeyDown={handleKeyDown}
-                className="flex-1 bg-gray-800 border-gray-700 text-white placeholder:text-gray-500"
+                className="flex-1 bg-gray-800 border-gray-700 text-white placeholder:text-gray-500 text-sm"
+                disabled={isSending}
               />
               <Button
                 onClick={sendMessage}
                 disabled={isSending || !newMessage.trim()}
-                className="bg-red-700 hover:bg-red-600 text-white px-4"
+                className="bg-red-600 hover:bg-red-700 text-white px-3"
               >
                 <Send className="w-4 h-4" />
               </Button>
             </div>
-            <p className="text-gray-600 text-xs mt-1">Appuyez sur Entrée pour envoyer</p>
           </div>
         </Card>
       </div>

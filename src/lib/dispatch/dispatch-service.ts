@@ -197,19 +197,30 @@ export function subscribeToRideRequests(
   db: ReturnType<typeof import('firebase/firestore').getFirestore>,
   callback: (requests: RideRequest[]) => void
 ): Unsubscribe {
+  // Sans orderBy pour éviter l'index composite manquant ride_requests(status+requestedAt)
+  // Tri effectué côté client
   const q = query(
     collection(db, 'ride_requests'),
     where('status', 'in', ['pending', 'searching']),
-    orderBy('requestedAt', 'desc'),
     limit(50)
   );
-  return onSnapshot(q, (snapshot) => {
-    const requests: RideRequest[] = snapshot.docs.map((d) => ({
-      id: d.id,
-      ...(d.data() as Omit<RideRequest, 'id'>),
-    }));
-    callback(requests);
-  });
+  return onSnapshot(
+    q,
+    (snapshot) => {
+      const requests: RideRequest[] = snapshot.docs
+        .map((d) => ({ id: d.id, ...(d.data() as Omit<RideRequest, 'id'>) }))
+        .sort((a: any, b: any) => {
+          const aTime = a.requestedAt?.toMillis?.() ?? 0;
+          const bTime = b.requestedAt?.toMillis?.() ?? 0;
+          return bTime - aTime;
+        });
+      callback(requests);
+    },
+    (err) => {
+      console.warn('subscribeToRideRequests error (ignoré):', err.message);
+      callback([]);
+    }
+  );
 }
 
 export function subscribeToActiveRides(
