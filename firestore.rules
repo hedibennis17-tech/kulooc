@@ -304,16 +304,46 @@ service cloud.firestore {
     }
 
     // ── driver_documents ──────────────────────────────────────────────────────
-    // Documents des chauffeurs (permis, assurance, etc.)
+    // Documents des chauffeurs (permis, assurance, antécédents, formation, etc.)
     match /driver_documents/{documentId} {
-      // Lecture : chauffeur propriétaire du document
-      allow read: if isSignedIn() && resource.data.driverId == request.auth.uid;
+      // Lecture : chauffeur propriétaire OU admin dashboard
+      allow read: if isSignedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        resource.data.userId == request.auth.uid
+      );
       // Création : chauffeur authentifié peut créer ses propres documents
-      allow create: if isSignedIn() && request.resource.data.driverId == request.auth.uid;
+      allow create: if isSignedIn() && (
+        request.resource.data.driverId == request.auth.uid ||
+        request.resource.data.userId == request.auth.uid
+      );
       // Mise à jour : chauffeur propriétaire uniquement
-      allow update: if isSignedIn() && resource.data.driverId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        resource.data.userId == request.auth.uid
+      );
       // Suppression : chauffeur propriétaire uniquement
-      allow delete: if isSignedIn() && resource.data.driverId == request.auth.uid;
+      allow delete: if isSignedIn() && (
+        resource.data.driverId == request.auth.uid ||
+        resource.data.userId == request.auth.uid
+      );
+    }
+
+    // ── background_checks ─────────────────────────────────────────────────────
+    // Vérifications d'antécédents judiciaires
+    match /background_checks/{checkId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
+    }
+
+    // ── training_certificates ─────────────────────────────────────────────────
+    // Attestations de formation taxi par province
+    match /training_certificates/{certId} {
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow delete: if false;
     }
 
     // ── admin_users ───────────────────────────────────────────────────────────

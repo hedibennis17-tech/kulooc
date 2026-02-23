@@ -73,6 +73,31 @@ service firebase.storage {
                       isValidFileType();
     }
     
+    // ── drivers/{driverId}/background_checks/{fileName} ───────────────────
+    // Antécédents judiciaires du chauffeur
+    match /drivers/{driverId}/background_checks/{fileName} {
+      allow read: if isOwner(driverId);
+      allow write: if isOwner(driverId) && isValidSize() && isValidFileType();
+      allow delete: if isOwner(driverId);
+    }
+
+    // ── drivers/{driverId}/training_certificates/{fileName} ────────────────
+    // Attestations de formation taxi par province
+    match /drivers/{driverId}/training_certificates/{fileName} {
+      allow read: if isOwner(driverId);
+      allow write: if isOwner(driverId) && isValidSize() && isValidFileType();
+      allow delete: if isOwner(driverId);
+    }
+
+    // ── drivers/{driverId}/vehicles/{vehicleId}/{fileName} ─────────────────
+    // Photos de véhicules du chauffeur
+    match /drivers/{driverId}/vehicles/{vehicleId}/{fileName} {
+      allow read: if isAuthenticated();
+      allow write: if isOwner(driverId) && isValidSize() &&
+                      request.resource.contentType.matches('image/.*');
+      allow delete: if isOwner(driverId);
+    }
+
     // Par défaut: Tout refuser
     match /{allPaths=**} {
       allow read, write: if false;
