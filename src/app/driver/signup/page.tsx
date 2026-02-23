@@ -10,10 +10,11 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Mail, Phone, Apple, Facebook } from 'lucide-react';
 import { FcGoogle } from 'react-icons/fc';
-import { signInWithPopup, GoogleAuthProvider, FacebookAuthProvider, OAuthProvider, createUserWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber } from 'firebase/auth';
-import { auth } from '@/firebase/client';
+import { signInWithPopup, GoogleAuthProvider, FacebookAuthProvider, OAuthProvider, createUserWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber, signInWithCredential, PhoneAuthProvider } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
-import { db } from '@/firebase/client';
+import { db, initializeFirebase } from '@/firebase';
+
+const { auth } = initializeFirebase();
 import Image from 'next/image';
 
 export default function DriverSignupPage() {
@@ -221,9 +222,8 @@ export default function DriverSignupPage() {
     setIsLoading(true);
     
     try {
-      // @ts-ignore
-      const credential = window.PhoneAuthProvider.credential(verificationId, verificationCode);
-      const result = await auth.signInWithCredential(credential);
+      const credential = PhoneAuthProvider.credential(verificationId, verificationCode);
+      const result = await signInWithCredential(auth, credential);
       
       await createDriverProfile(result.user.uid, result.user.email, result.user.phoneNumber);
       

@@ -4,7 +4,11 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useUser } from '@/firebase/provider';
 import { doc, getDoc, updateDoc } from 'firebase/firestore';
-import { db, storage } from '@/firebase/client';
+import { db, initializeFirebase } from '@/firebase';
+import { getStorage } from 'firebase/storage';
+
+const { firebaseApp } = initializeFirebase();
+const storage = getStorage(firebaseApp);
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
