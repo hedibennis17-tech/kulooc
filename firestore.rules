@@ -2,361 +2,222 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    /**
-     * Core Philosophy: This ruleset enforces a security model based on strict data ownership,
-     * collaborative access for shared resources, and public read-only access for global
-     * configuration data. The primary goal is to ensure that users can only access and modify
-     * their own information, while allowing controlled access for interactions like rides.
-     * All write operations are restricted to authenticated users.
-     *
-     * Data Structure:
-     * - User-specific data (profiles, addresses) is nested under /users/{userId}.
-     * - Collaborative data (rides) is in a top-level collection to facilitate queries
-     *   by either participant (rider or driver).
-     * - Public, app-wide data (services, promotions, etc.) is stored in separate
-     *   top-level collections.
-     *
-     * Key Security Decisions:
-     * - User data is strictly private. Listing users is disallowed.
-     * - Rides are accessible only by the two participants involved: the rider and the driver.
-     * - Public data collections are read-only for all clients to prevent unauthorized
-     *   modification. All writes to these collections must be performed via a trusted
-     *   backend/admin environment.
-     * - The default security posture for any unhandled path is to deny all access.
-     *
-     * Denormalization for Authorization: To create simpler, more performant rules, data
-     * required for an authorization decision is denormalized directly onto the documents
-     * being secured.
-     * - /drivers/{driverId}: Contains a `userId` field to link back to the auth UID.
-     * - /rides/{rideId}: Contains both a `userId` (rider's UID) and a `driverUserId`
-     *   (driver's UID) to allow authorization checks for either party without extra `get` calls.
-     * - /users/{userId}/addresses/{addressId}: Contains an `ownerId` field that mirrors the
-     *   `{userId}` from the path to ensure relational integrity on creation.
-     */
+    // ── Constantes ────────────────────────────────────────────────────────────
+    // Email du super administrateur KULOOC
+    // Toutes les règles ci-dessous accordent un accès complet à cet utilisateur.
 
-    // --------------------------------------------------------------------------
-    // Helper Functions
-    // --------------------------------------------------------------------------
+    // ── Fonctions utilitaires ─────────────────────────────────────────────────
 
-    /**
-     * Checks if the user is authenticated.
-     */
     function isSignedIn() {
       return request.auth != null;
     }
 
-    /**
-     * Checks if the authenticated user's UID matches the provided userId.
-     * This is the primary function for verifying resource ownership.
-     */
     function isOwner(userId) {
       return isSignedIn() && request.auth.uid == userId;
     }
 
-    /**
-     * Checks if a document being modified already exists.
-     * Crucial for all update and delete operations.
-     */
     function isExistingDoc() {
       return resource != null;
     }
 
-    /**
-     * Combines ownership check with an existence check.
-     * Used for secure update and delete operations on user-owned documents.
-     */
     function isOwnerOfExistingDoc(userId) {
       return isOwner(userId) && isExistingDoc();
     }
-    
-    /**
-     * Validates that the requesting user is the one who created the ride document.
-     * Ensures the `userId` field is set correctly to the creator's UID.
-     */
-    function isRideCreator(rideDoc) {
-      return isOwner(rideDoc.userId);
-    }
-    
-    /**
-     * Validates if the requesting user is a participant in the ride,
-     * either as the user (rider) or the driver.
-     */
-    function isRideParticipant(rideDoc) {
-      return isSignedIn() && (request.auth.uid == rideDoc.userId || request.auth.uid == rideDoc.driverUserId);
-    }
 
-    /**
-     * Enforces immutability for a specific field during an update operation.
-     * Prevents critical relational IDs from being changed after creation.
-     */
     function isImmutable(fieldName) {
       return request.resource.data[fieldName] == resource.data[fieldName];
     }
 
-    // --------------------------------------------------------------------------
-    // User Data
-    // --------------------------------------------------------------------------
+    // Vérifie si l'utilisateur connecté est le super admin (par email)
+    function isSuperAdmin() {
+      return isSignedIn() && request.auth.token.email == 'hedibennis17@gmail.com';
+    }
 
-    /**
-     * @description Manages a user's own profile data.
-     * @path /users/{userId}
-     * @allow A signed-in user (create)s their own profile document where the document ID matches their UID.
-     * @deny An anonymous user tries to (get) any user profile.
-     * @deny A signed-in user tries to (update) another user's profile.
-     * @principle Restricts access to a user's own data tree and enforces self-creation.
-     */
+    // Vérifie si l'utilisateur est admin (super admin OU admin enregistré dans admin_users)
+    function isAdmin() {
+      return isSuperAdmin() ||
+        (isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)));
+    }
+
+    function isRideParticipant(rideDoc) {
+      return isSignedIn() && (
+        request.auth.uid == rideDoc.userId ||
+        request.auth.uid == rideDoc.driverUserId
+      );
+    }
+
+    // ── users ─────────────────────────────────────────────────────────────────
     match /users/{userId} {
-      allow get: if isOwner(userId);
-      allow list: if false;
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
       allow create: if isOwner(userId) && request.resource.data.id == userId;
-      allow update: if isOwnerOfExistingDoc(userId) && isImmutable('id');
-      allow delete: if isOwnerOfExistingDoc(userId);
+      allow update: if isOwnerOfExistingDoc(userId) && isImmutable('id') || isAdmin();
+      allow delete: if isOwnerOfExistingDoc(userId) || isAdmin();
     }
 
-    /**
-     * @description Manages addresses owned by a specific user.
-     * @path /users/{userId}/addresses/{addressId}
-     * @allow A user (list)s their own saved addresses.
-     * @deny A user tries to (create) an address under another user's profile.
-     * @deny A user tries to (delete) an address belonging to another user.
-     * @principle Enforces document ownership within a user's private subcollection.
-     */
     match /users/{userId}/addresses/{addressId} {
-      allow get, list: if isOwner(userId);
+      allow get, list: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId) && request.resource.data.ownerId == userId;
-      allow update: if isOwnerOfExistingDoc(userId) && isImmutable('ownerId');
-      allow delete: if isOwnerOfExistingDoc(userId);
+      allow update: if isOwnerOfExistingDoc(userId) && isImmutable('ownerId') || isAdmin();
+      allow delete: if isOwnerOfExistingDoc(userId) || isAdmin();
     }
 
-    // --------------------------------------------------------------------------
-    // Application Core Data
-    // --------------------------------------------------------------------------
-
-    /**
-     * @description Manages driver profiles, which are publicly readable but only writable by the owner.
-     * @path /drivers/{driverId}
-     * @allow Any signed-in user (get)s a driver's profile to see their location or rating.
-     * @allow A driver (update)s their own profile after it has been created.
-     * @deny An anonymous user tries to (list) all drivers.
-     * @deny A driver tries to (delete) another driver's profile.
-     * @principle Implements a public-read, owner-write model using a denormalized `userId`.
-     */
+    // ── drivers ───────────────────────────────────────────────────────────────
     match /drivers/{driverId} {
       allow get, list: if isSignedIn();
       allow create: if isSignedIn() && isOwner(request.resource.data.userId);
-      allow update: if isExistingDoc() && isOwner(resource.data.userId) && isImmutable('userId');
-      allow delete: if isExistingDoc() && isOwner(resource.data.userId);
+      allow update: if (isExistingDoc() && isOwner(resource.data.userId) && isImmutable('userId')) || isAdmin();
+      allow delete: if (isExistingDoc() && isOwner(resource.data.userId)) || isAdmin();
     }
-    
-    /**
-     * @description Manages individual rides, accessible only to the rider or driver.
-     * @path /rides/{rideId}
-     * @allow The rider (`userId`) (get)s their own ride details.
-     * @allow The driver (`driverUserId`) (update)s the status of an assigned ride.
-     * @deny Any user tries to (list) all rides in the system. This is a critical privacy rule.
-     * @deny A user who is not the rider or driver tries to (get) the ride details.
-     * @principle Enforces shared access for collaborative documents based on denormalized participant UIDs.
-     */
+
+    // ── rides ─────────────────────────────────────────────────────────────────
     match /rides/{rideId} {
-      allow get: if isRideParticipant(resource.data);
-      allow list: if false;
-      // Permettre la création si l'utilisateur est authentifié et que userId correspond
+      allow get: if isRideParticipant(resource.data) || isAdmin();
+      allow list: if isAdmin();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isExistingDoc() && isRideParticipant(resource.data);
-      allow delete: if isExistingDoc() && isRideParticipant(resource.data);
-    }
-
-    // --------------------------------------------------------------------------
-    // Public Read-Only Configurations
-    // --------------------------------------------------------------------------
-
-    /**
-     * @description Defines the services offered by the application (e.g., 'Standard Ride').
-     * @path /services/{serviceId}
-     * @allow Any user, including anonymous ones, can (get) or (list) available services.
-     * @deny Any client tries to (create), (update), or (delete) a service.
-     * @principle Provides public read-only access for global configuration data. Writes are admin-only.
-     */
-    match /services/{serviceId} {
-      allow get, list: if true;
-      allow create, update, delete: if false;
-    }
-
-    /**
-     * @description Defines promotional offers available in the application.
-     * @path /promotions/{promotionId}
-     * @allow Any user, including anonymous ones, can (get) or (list) available promotions.
-     * @deny Any client tries to (create), (update), or (delete) a promotion.
-     * @principle Provides public read-only access for global configuration data. Writes are admin-only.
-     */
-    match /promotions/{promotionId} {
-      allow get, list: if true;
-      allow create, update, delete: if false;
-    }
-
-    /**
-     * @description Defines points of interest to be displayed on the map.
-     * @path /pointsOfInterest/{poiId}
-     * @allow Any user, including anonymous ones, can (get) or (list) points of interest.
-     * @deny Any client tries to (create), (update), or (delete) a point of interest.
-     * @principle Provides public read-only access for global configuration data. Writes are admin-only.
-     */
-    match /pointsOfInterest/{poiId} {
-      allow get, list: if true;
-      allow create, update, delete: if false;
-    }
-
-    /**
-     * @description Manages dynamic application settings fetched by clients at runtime.
-     * @path /appConfigurations/{configId}
-     * @allow Any user, including anonymous ones, can (get) or (list) app configurations.
-     * @deny Any client tries to (create), (update), or (delete) a configuration.
-     * @principle Provides public read-only access for global configuration data. Writes are admin-only.
-     */
-    match /appConfigurations/{configId} {
-      allow get, list: if true;
-      allow create, update, delete: if false;
-    }
-
-    /**
-     * @description Defines geographic zones with high demand, potentially affecting pricing.
-     * @path /highDemandZones/{zoneId}
-     * @allow Any user, including anonymous ones, can (get) or (list) high demand zones.
-     * @deny Any client tries to (create), (update), or (delete) a high demand zone.
-     * @principle Provides public read-only access for global configuration data. Writes are admin-only.
-     */
-    match /highDemandZones/{zoneId} {
-      allow get, list: if true;
-      allow create, update, delete: if false;
+      allow update: if (isExistingDoc() && isRideParticipant(resource.data)) || isAdmin();
+      allow delete: if (isExistingDoc() && isRideParticipant(resource.data)) || isAdmin();
     }
 
     // ── ride_requests ─────────────────────────────────────────────────────────
-    // Demandes de course créées par les passagers — visibles par passager + chauffeurs
     match /ride_requests/{requestId} {
       allow create: if isSignedIn();
       allow read: if isSignedIn();
       allow update: if isSignedIn();
-      allow delete: if isSignedIn() && resource.data.passengerId == request.auth.uid;
+      allow delete: if isSignedIn() && resource.data.passengerId == request.auth.uid || isAdmin();
     }
 
     // ── active_rides ──────────────────────────────────────────────────────────
-    // Courses actives — accessibles par passager ET chauffeur
     match /active_rides/{rideId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
       allow update: if isSignedIn();
-      allow delete: if false;
+      allow delete: if isAdmin();
     }
 
     // ── completed_rides ───────────────────────────────────────────────────────
-    // Historique des courses terminées
     match /completed_rides/{rideId} {
-      allow read: if isSignedIn() && (
+      allow read: if isAdmin() || (isSignedIn() && (
         resource.data.passengerId == request.auth.uid ||
         resource.data.driverId == request.auth.uid
-      );
+      ));
       allow create: if isSignedIn();
-      allow update, delete: if false;
+      allow update, delete: if isAdmin();
     }
 
     // ── zones ─────────────────────────────────────────────────────────────────
-    // Zones géographiques et métriques de surge
     match /zones/{zoneId} {
       allow read: if isSignedIn();
-      allow write: if false;
+      allow write: if isAdmin();
     }
 
     // ── system_config ─────────────────────────────────────────────────────────
-    // Configuration globale du système (tarifs, dispatch, etc.)
     match /system_config/{configId} {
       allow read: if isSignedIn();
-      allow write: if false;
+      allow write: if isAdmin();
+    }
+
+    // ── services ──────────────────────────────────────────────────────────────
+    match /services/{serviceId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── promotions ────────────────────────────────────────────────────────────
+    match /promotions/{promotionId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── pointsOfInterest ──────────────────────────────────────────────────────
+    match /pointsOfInterest/{poiId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── appConfigurations ─────────────────────────────────────────────────────
+    match /appConfigurations/{configId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
+    }
+
+    // ── highDemandZones ───────────────────────────────────────────────────────
+    match /highDemandZones/{zoneId} {
+      allow get, list: if true;
+      allow create, update, delete: if isAdmin();
     }
 
     // ── ratings ───────────────────────────────────────────────────────────────
-    // Évaluations post-course
     match /ratings/{ratingId} {
       allow read: if isSignedIn();
       allow create: if isSignedIn();
-      allow update, delete: if false;
+      allow update, delete: if isAdmin();
     }
 
     // ── notifications ─────────────────────────────────────────────────────────
-    // Notifications push
     match /notifications/{notifId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isSignedIn() && resource.data.userId == request.auth.uid || isAdmin();
       allow create: if isSignedIn();
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if isSignedIn() && resource.data.userId == request.auth.uid || isAdmin();
+      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid || isAdmin();
     }
 
     // ── favorite_addresses ────────────────────────────────────────────────────
-    // Adresses favorites des utilisateurs (Maison, Travail, etc.)
     match /favorite_addresses/{addressId} {
-      // Lecture : utilisateur connecté peut lire ses propres adresses
-      allow get, list: if isSignedIn() && resource.data.userId == request.auth.uid;
-      // Création : utilisateur connecté peut créer ses propres adresses
+      allow get, list: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      // Mise à jour : utilisateur connecté peut modifier ses propres adresses
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid && isImmutable('userId');
-      // Suppression : utilisateur connecté peut supprimer ses propres adresses
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow update: if (isSignedIn() && resource.data.userId == request.auth.uid && isImmutable('userId')) || isAdmin();
+      allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
     }
 
     // ── driver_documents ──────────────────────────────────────────────────────
-    // Documents des chauffeurs (permis, assurance, antécédents, formation, etc.)
     match /driver_documents/{documentId} {
-      // Lecture : chauffeur propriétaire OU admin dashboard
-      allow read: if isSignedIn() && (
+      allow read: if isAdmin() || (isSignedIn() && (
         resource.data.driverId == request.auth.uid ||
         resource.data.userId == request.auth.uid
-      );
-      // Création : chauffeur authentifié peut créer ses propres documents
+      ));
       allow create: if isSignedIn() && (
         request.resource.data.driverId == request.auth.uid ||
         request.resource.data.userId == request.auth.uid
       );
-      // Mise à jour : chauffeur propriétaire uniquement
-      allow update: if isSignedIn() && (
+      allow update: if isAdmin() || (isSignedIn() && (
         resource.data.driverId == request.auth.uid ||
         resource.data.userId == request.auth.uid
-      );
-      // Suppression : chauffeur propriétaire uniquement
-      allow delete: if isSignedIn() && (
+      ));
+      allow delete: if isAdmin() || (isSignedIn() && (
         resource.data.driverId == request.auth.uid ||
         resource.data.userId == request.auth.uid
-      );
+      ));
     }
 
     // ── background_checks ─────────────────────────────────────────────────────
-    // Vérifications d'antécédents judiciaires
     match /background_checks/{checkId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow delete: if false;
+      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin();
     }
 
     // ── training_certificates ─────────────────────────────────────────────────
-    // Attestations de formation taxi par province
     match /training_certificates/{certId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid;
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
       allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid;
-      allow delete: if false;
+      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow delete: if isAdmin();
     }
 
     // ── admin_users ───────────────────────────────────────────────────────────
-    // Utilisateurs admin - accès restreint aux utilisateurs authentifiés
+    // Le super admin peut tout lire/écrire. Les autres admins peuvent lire leur propre doc.
     match /admin_users/{userId} {
-      // Lecture : utilisateur connecté peut lire son propre document
-      allow get: if isSignedIn() && request.auth.uid == userId;
-      // Liste : bloqué pour tout le monde
-      allow list: if false;
-      // Création/Mise à jour : utilisateur connecté peut créer/modifier son propre document
-      allow create, update: if isSignedIn() && request.auth.uid == userId;
-      // Suppression : bloquée pour tout le monde (seul un admin backend peut supprimer)
-      allow delete: if false;
+      allow get: if isSuperAdmin() || isOwner(userId);
+      allow list: if isSuperAdmin();
+      allow create, update: if isSuperAdmin() || isOwner(userId);
+      allow delete: if isSuperAdmin();
+    }
+
+    // ── Règle par défaut : tout refuser ───────────────────────────────────────
+    match /{document=**} {
+      allow read, write: if isAdmin();
     }
   }
 }
