@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, SlidersHorizontal, AlertTriangle, ChevronRight, TrendingUp, Plane } from 'lucide-react';
+import { Shield, SlidersHorizontal, TrendingUp, Plane } from 'lucide-react';
 import { useUser } from '@/firebase/provider';
 import { useDriver } from '@/lib/firestore/use-driver';
 import { MapView } from '@/components/kulooc/map-view';
@@ -139,24 +139,12 @@ export default function DriverHomePage() {
         </div>
       )}
 
-      {/* Alerte si hors ligne */}
+      {/* Info si hors ligne */}
       {!isOnline && (
         <div className="absolute top-20 left-4 right-4 z-10 space-y-3">
           <div className="bg-white rounded-2xl shadow-lg p-4">
-            <h2 className="text-2xl font-black text-black mb-3">Impossible de<br />passer en ligne</h2>
-            <div className="bg-red-50 rounded-xl p-3 border border-red-100">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="h-5 w-5 text-red-500 mt-0.5 flex-shrink-0" />
-                <div>
-                  <p className="font-semibold text-sm text-gray-900">Actions requises (1)</p>
-                  <p className="text-red-600 text-xs mt-0.5">Une fois le problème résolu, vous pourrez passer en ligne.</p>
-                </div>
-              </div>
-              <button className="w-full mt-3 flex items-center justify-between text-sm font-medium text-gray-800">
-                <span>Documents manquants</span>
-                <ChevronRight className="h-4 w-4" />
-              </button>
-            </div>
+            <h2 className="text-2xl font-black text-black mb-2">Prêt à conduire ?</h2>
+            <p className="text-sm text-gray-500">Appuyez sur <strong>Passer en ligne</strong> pour commencer à recevoir des courses.</p>
           </div>
 
           {/* Occasions */}

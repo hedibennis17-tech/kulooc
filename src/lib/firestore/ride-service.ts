@@ -9,6 +9,7 @@ import {
   doc,
   addDoc,
   updateDoc,
+  setDoc,
   onSnapshot,
   query,
   where,
@@ -231,10 +232,10 @@ export async function updateDriverLocation(
   driverId: string,
   location: { latitude: number; longitude: number }
 ): Promise<void> {
-  await updateDoc(doc(db, 'drivers', driverId), {
+  await setDoc(doc(db, 'drivers', driverId), {
     location,
     lastLocationUpdate: serverTimestamp(),
-  });
+  }, { merge: true });
 }
 
 // ─── Mettre à jour le statut du chauffeur ─────────────────────────────────────
@@ -256,7 +257,8 @@ export async function updateDriverStatus(
     updates.location = null;
   }
 
-  await updateDoc(doc(db, 'drivers', driverId), updates);
+  // setDoc avec merge:true crée le document s'il n'existe pas encore
+  await setDoc(doc(db, 'drivers', driverId), updates, { merge: true });
 }
 
 // ─── Calculer le tarif d'une course ───────────────────────────────────────────
