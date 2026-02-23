@@ -27,12 +27,27 @@ export interface RideRequest {
   passengerId: string;
   passengerName: string;
   passengerPhone?: string;
-  pickup: { address: string; lat?: number; lng?: number };
-  destination: { address: string; lat?: number; lng?: number };
+  pickup: {
+    address: string;
+    lat?: number;
+    lng?: number;
+    latitude?: number;
+    longitude?: number;
+  };
+  destination: {
+    address: string;
+    lat?: number;
+    lng?: number;
+    latitude?: number;
+    longitude?: number;
+  };
   serviceType: string;
   estimatedPrice: number;
-  estimatedDuration: number;
-  estimatedDistance: number;
+  estimatedDuration?: number;
+  estimatedDurationMin?: number;
+  estimatedDistance?: number;
+  estimatedDistanceKm?: number;
+  surgeMultiplier?: number;
   status: 'pending' | 'accepted' | 'in_progress' | 'completed' | 'cancelled';
   createdAt: any;
   notes?: string;

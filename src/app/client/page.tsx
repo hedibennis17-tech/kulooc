@@ -255,15 +255,40 @@ export default function ClientHomePage() {
     return () => unsub();
   }, [db]);
 
-  // ─── Course active du passager ───────────────────────────────────────────────
+   // ─── Course active du passager ───────────────────────────────────────────
   useEffect(() => {
     if (!user || !db) return;
     const unsub = subscribeToPassengerRide(db, user.uid, (ride) => {
+      const prevStatus = activeRide?.status;
       setActiveRide(ride);
-      if (ride && step !== 'active') setStep('active');
+      if (ride) {
+        // Passer à l'étape active dès qu'un chauffeur est assigné
+        if (
+          ride.status === 'driver-assigned' ||
+          ride.status === 'driver-arrived' ||
+          ride.status === 'in-progress'
+        ) {
+          setStep('active');
+        }
+        // Notifier le passager quand le chauffeur arrive
+        if (ride.status === 'driver-arrived' && prevStatus !== 'driver-arrived') {
+          toast({ title: '📍 Votre chauffeur est arrivé !', description: 'Votre taxi KULOOC est devant vous.' });
+        }
+        // Course démarrée
+        if (ride.status === 'in-progress' && prevStatus !== 'in-progress') {
+          toast({ title: '🏁 Course démarrée !', description: 'Bon voyage !' });
+        }
+        // Course terminée
+        if (ride.status === 'completed') {
+          setStep('search');
+          setCurrentRequestId(null);
+          toast({ title: '✅ Course terminée !', description: `Merci d'avoir choisi KULOOC 🍁` });
+        }
+      }
       if (!ride && step === 'active') setStep('search');
     });
     return () => unsub();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, db]);
 
   const handleSearch = () => {

@@ -59,7 +59,7 @@ export function calculateMatchScore(params: {
   languageMatch?: boolean;
   capacityOk?: boolean;
   futureDemand?: number; // Forward-looking factor
-}): MatchScore['breakdown'] & { total: number } {
+}): { etaScore: number; ratingScore: number; acceptanceScore: number; distanceScore: number; total: number } {
   const {
     etaSeconds,
     driverRating,

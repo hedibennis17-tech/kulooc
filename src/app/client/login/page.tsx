@@ -15,7 +15,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Mail, Lock, User, Eye, EyeOff, MapleLeaf } from 'lucide-react';
+import { Loader2, Mail, Lock, User, Eye, EyeOff, Leaf } from 'lucide-react';
 import Link from 'next/link';
 import { cn } from '@/lib/utils';
 

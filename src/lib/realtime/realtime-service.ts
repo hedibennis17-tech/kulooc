@@ -83,6 +83,7 @@ export type LiveActiveRide = {
   requestId?: string;
   passengerId: string;
   passengerName: string;
+  passengerPhone?: string;
   driverId: string;
   driverName: string;
   driverLocation?: { latitude: number; longitude: number };
@@ -90,13 +91,30 @@ export type LiveActiveRide = {
   destination: { latitude: number; longitude: number; address: string };
   serviceType: string;
   status: string;
+  estimatedPrice?: number;
+  estimatedDistanceKm?: number;
+  estimatedDurationMin?: number;
+  finalPrice?: number;
+  actualDurationMin?: number;
+  driverEarnings?: number;
   pricing?: {
-    subtotal: number;
-    tax: number;
-    total: number;
+    base?: number;
+    perKmCharge?: number;
+    perMinCharge?: number;
+    subtotalWithSurge?: number;
+    tps?: number;
+    tvq?: number;
+    subtotal?: number;
+    tax?: number;
+    total?: number;
+    distanceKm?: number;
+    durationMin?: number;
+    surgeMultiplier?: number;
+    driverEarnings?: number;
   };
   assignedAt?: any;
   startedAt?: any;
+  completedAt?: any;
 };
 
 // ─── Subscriptions ────────────────────────────────────────────────────────────

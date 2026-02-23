@@ -29,7 +29,7 @@ export default function RidersHelpPage() {
                       <ChevronRight className="h-5 w-5 text-muted-foreground" />
                     </a>
                   </Link>
-                  {index < riderHub.sections.length - 1 && <div className="border-b mx-6" />}
+                  {index < (riderHub.sections?.length ?? 0) - 1 && <div className="border-b mx-6" />}
                 </React.Fragment>
               ))}
             </div>

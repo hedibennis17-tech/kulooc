@@ -1,150 +1,156 @@
-// ============================================================
-// KULOOC Dispatch System — Types & Interfaces
-// ============================================================
+/**
+ * KULOOC — Types partagés pour le module dispatch
+ */
+import { Timestamp } from 'firebase/firestore';
 
-export type DriverStatus = 'offline' | 'online' | 'en-route' | 'on-trip' | 'busy';
-export type RideStatus = 'pending' | 'searching' | 'matched' | 'driver-assigned' | 'driver-arrived' | 'in-progress' | 'completed' | 'cancelled' | 'expired';
-export type OfferStatus = 'pending' | 'accepted' | 'declined' | 'expired';
+// ─── Types de base ────────────────────────────────────────────────────────────
 
-export interface GeoPoint {
+export type GeoPoint = {
   latitude: number;
   longitude: number;
-}
+  address?: string;
+};
 
-export interface DriverLocation extends GeoPoint {
-  heading?: number;
-  speed?: number;
-  accuracy?: number;
-  h3Cell?: string;
-  timestamp?: Date;
-}
+export type RideStatus =
+  | 'pending'
+  | 'searching'
+  | 'driver-assigned'
+  | 'driver-arrived'
+  | 'in-progress'
+  | 'completed'
+  | 'cancelled';
 
-export interface DriverVehicle {
-  make: string;
-  model: string;
-  year: number;
-  color: string;
-  licensePlate: string;
-  capacity: number;
-  type: 'standard' | 'xl' | 'premium' | 'electric' | 'comfort';
-  features?: string[];
-}
+// ─── Chauffeur pour le dispatch ───────────────────────────────────────────────
 
 export interface DispatchDriver {
   id: string;
-  userId: string;
   name: string;
+  email?: string;
   phone?: string;
-  photoUrl?: string;
-  status: DriverStatus;
-  onlineSince?: Date;
-  lastSeen?: Date;
-  currentLocation?: DriverLocation;
-  vehicle: DriverVehicle;
+  status: 'online' | 'offline' | 'en-route' | 'on-trip' | 'busy';
+  location?: { latitude: number; longitude: number };
+  currentLocation?: { latitude: number; longitude: number }; // Alias pour location
+  onlineSince?: Timestamp | null;
+  averageRating?: number;
+  totalRides?: number;
+  acceptanceRate?: number;
+  vehicleType?: string;
   currentRideId?: string | null;
-  totalRidesToday: number;
-  acceptanceRate: number;
-  averageRating: number;
-  preferences?: {
-    maxDetourMinutes?: number;
-    language?: string;
+  zone?: string;
+  vehicle?: {
+    make: string;
+    model: string;
+    year?: number;
+    licensePlate: string;
+    color?: string;
+    type?: 'car' | 'suv' | 'truck' | 'van' | 'electric';
   };
 }
 
-export interface RideLocation {
-  address: string;
-  location: GeoPoint;
-  h3Cell?: string;
-}
+// ─── Demande de course ────────────────────────────────────────────────────────
 
 export interface RideRequest {
-  id: string;
+  id?: string;
   passengerId: string;
-  passengerName?: string;
-  pickup: RideLocation;
-  destination: RideLocation;
-  productType: 'standard' | 'xl' | 'premium' | 'electric' | 'comfort';
-  estimatedFare: number;
-  estimatedDistance: number;
-  estimatedDuration: number;
-  requestedAt: Date;
-  expiresAt?: Date;
+  passengerName: string;
+  passengerPhone?: string;
+  pickup: GeoPoint & { address: string; location?: { latitude: number; longitude: number } };
+  destination: GeoPoint & { address: string; location?: { latitude: number; longitude: number } };
+  serviceType: string;
+  estimatedPrice: number;
+  estimatedDistanceKm: number;
+  estimatedDurationMin: number;
+  surgeMultiplier: number;
   status: RideStatus;
-  matchingRadius: number;
-  candidateDrivers?: CandidateDriver[];
-  assignedDriverId?: string | null;
-  assignedAt?: Date;
-  surgeMultiplier?: number;
+  requestedAt?: Timestamp;
+  assignedAt?: Timestamp;
+  driverId?: string;
+  driverName?: string;
+  notes?: string;
+  paymentMethod?: string;
+  dispatchAttempts?: number;
+  lastDispatchedAt?: Timestamp;
 }
 
-export interface CandidateDriver {
-  driverId: string;
-  score: number;
-  etaToPickup: number;
-  distanceToPickup: number;
-}
+// ─── Course active ────────────────────────────────────────────────────────────
 
 export interface ActiveRide {
-  id: string;
+  id?: string;
+  requestId: string;
   passengerId: string;
-  passengerName?: string;
+  passengerName: string;
+  passengerPhone?: string;
   driverId: string;
-  driverName?: string;
-  pickup: RideLocation;
-  destination: RideLocation;
+  driverName: string;
+  driverLocation?: { latitude: number; longitude: number };
+  pickup: GeoPoint & { address: string };
+  destination: GeoPoint & { address: string };
+  serviceType: string;
   status: RideStatus;
-  assignedAt?: Date;
-  driverArrivedAt?: Date;
-  startedAt?: Date;
-  completedAt?: Date;
-  pricing?: {
-    baseFare: number;
-    distanceFare: number;
-    timeFare: number;
+  estimatedPrice?: number;
+  estimatedDistanceKm?: number;
+  estimatedDurationMin?: number;
+  pricing: {
+    base: number;
+    perKm: number;
+    perMin: number;
+    distanceKm: number;
+    durationMin: number;
     surgeMultiplier: number;
     subtotal: number;
     tax: number;
     total: number;
+    driverEarnings?: number;
+    platformFee?: number;
   };
-  actualRoute?: {
-    distanceKm: number;
-    durationMinutes: number;
-    polyline?: string;
-  };
+  assignedAt?: Timestamp;
+  startedAt?: Timestamp;
+  completedAt?: Timestamp;
+  polyline?: string;
 }
 
-export interface ZoneMetrics {
-  cellId: string;
-  availableDrivers: string[];
-  driversCount: number;
-  pendingRequests: string[];
-  pendingCount: number;
-  demandSupplyRatio: number;
-  smoothedSurge: number;
-  updatedAt?: Date;
-}
+// ─── Métriques de dispatch ────────────────────────────────────────────────────
 
 export interface DispatchMetrics {
+  totalDispatched: number;
+  totalAccepted: number;
+  totalDeclined: number;
+  totalExpired: number;
+  avgResponseTimeMs: number;
+  avgDistanceKm: number;
+  activeRequests: number;
   activeDrivers: number;
-  onlineDrivers: number;
-  pendingRequests: number;
-  activeRides: number;
-  completedToday: number;
-  avgWaitTimeSeconds: number;
-  avgRating: number;
-  surgeZones: number;
-  revenue: number;
+  timestamp: Timestamp;
 }
+
+// ─── Score de matching ────────────────────────────────────────────────────────
 
 export interface MatchScore {
   driverId: string;
+  driverName: string;
   score: number;
-  etaToPickup: number;
-  distanceToPickup: number;
-  breakdown: {
-    etaScore: number;
-    ratingScore: number;
-    acceptanceScore: number;
-    distanceScore: number;
-  };
+  distanceKm: number;
+  etaMinutes: number;
+  waitTimeSeconds: number;
+  rating: number;
+}
+
+// ─── Métriques de zone ────────────────────────────────────────────────────────
+
+export interface ZoneMetrics {
+  zoneId: string;
+  activeDrivers: number;
+  pendingRequests: number;
+  avgWaitTimeMin: number;
+  surgeMultiplier: number;
+  lastUpdated: Timestamp;
+}
+
+// ─── Candidat chauffeur ───────────────────────────────────────────────────────
+
+export interface CandidateDriver {
+  driver: DispatchDriver;
+  distanceKm: number;
+  etaMinutes: number;
+  score: number;
 }

@@ -41,19 +41,22 @@ function getElapsedTime(date: Date | any): string {
 }
 
 function getBestDrivers(request: RideRequest, drivers: DispatchDriver[], top = 3) {
-  const available = drivers.filter((d) => d.status === 'online' && d.currentLocation);
+  const available = drivers.filter((d) => d.status === 'online' && (d.currentLocation || d.location));
 
   return available
     .map((driver) => {
+      const driverLoc = driver.currentLocation ?? driver.location;
+      const pickupLat = request.pickup.location?.latitude ?? request.pickup.latitude ?? 45.5;
+      const pickupLng = request.pickup.location?.longitude ?? request.pickup.longitude ?? -73.5;
       const distKm = haversineDistance(
-        { latitude: driver.currentLocation!.latitude, longitude: driver.currentLocation!.longitude },
-        { latitude: request.pickup.location.latitude, longitude: request.pickup.location.longitude }
+        { latitude: driverLoc!.latitude, longitude: driverLoc!.longitude },
+        { latitude: pickupLat, longitude: pickupLng }
       );
       const etaSec = (distKm / 30) * 3600; // 30 km/h average urban speed
       const score = calculateMatchScore({
         etaSeconds: etaSec,
-        driverRating: driver.averageRating,
-        acceptanceRate: driver.acceptanceRate,
+        driverRating: driver.averageRating ?? 4.5,
+        acceptanceRate: driver.acceptanceRate ?? 0.9,
         distanceKm: distKm,
       });
       return { driver, distKm, etaSec, score: score.total };
@@ -123,14 +126,14 @@ export function RideRequestsPanel({ requests, drivers, onAssign, onAutoAssign }:
                   <div key={req.id} className="p-3 hover:bg-muted/30 transition-colors">
                     <div
                       className="cursor-pointer"
-                      onClick={() => setExpandedId(isExpanded ? null : req.id)}
+                      onClick={() => setExpandedId(isExpanded ? null : req.id ?? null)}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1">
                             <span
                               className="w-2 h-2 rounded-full flex-shrink-0"
-                              style={{ backgroundColor: productColors[req.productType] ?? '#6b7280' }}
+                              style={{ backgroundColor: productColors[req.serviceType] ?? '#6b7280' }}
                             />
                             <span className="text-xs font-semibold truncate">
                               {req.passengerName || 'Passager'}
@@ -155,26 +158,12 @@ export function RideRequestsPanel({ requests, drivers, onAssign, onAutoAssign }:
                             {req.status}
                           </span>
                           <span className="text-xs font-semibold text-green-600">
-                            ${req.estimatedFare?.toFixed(2)}
+                            ${(req.estimatedPrice ?? 0).toFixed(2)}
                           </span>
                           {req.surgeMultiplier && req.surgeMultiplier > 1 && (
                             <span className="text-xs text-orange-500 font-medium">
                               ×{req.surgeMultiplier.toFixed(1)} surge
                             </span>
-                          )}
-                          {onAutoAssign && req.status === 'pending' && (
-                            <Button
-                              size="sm"
-                              className="h-6 text-xs px-2 bg-red-600 hover:bg-red-700 text-white mt-0.5"
-                              disabled={autoAssigning === req.id}
-                              onClick={(e) => { e.stopPropagation(); handleAutoAssign(req.id); }}
-                            >
-                              {autoAssigning === req.id ? (
-                                <span className="inline-block animate-spin">⚡</span>
-                              ) : (
-                                <><Zap className="w-3 h-3 mr-0.5" />Auto</>
-                              )}
-                            </Button>
                           )}
                         </div>
                       </div>
@@ -198,7 +187,7 @@ export function RideRequestsPanel({ requests, drivers, onAssign, onAutoAssign }:
                                 <div className="flex-1 min-w-0">
                                   <p className="text-xs font-medium truncate">{driver.name}</p>
                                   <p className="text-xs text-muted-foreground">
-                                    {driver.vehicle.make} {driver.vehicle.model} · ★{driver.averageRating}
+                                    {driver.vehicle?.make} {driver.vehicle?.model} · ★{driver.averageRating ?? '—'}
                                   </p>
                                   <p className="text-xs text-muted-foreground">
                                     {distKm.toFixed(1)} km · ~{Math.ceil(etaSec / 60)} min
@@ -219,21 +208,21 @@ export function RideRequestsPanel({ requests, drivers, onAssign, onAutoAssign }:
                                   <Button
                                     size="sm"
                                     className="h-6 text-xs px-2"
-                                    disabled={assigning === req.id}
-                                    onClick={() => handleAssign(req.id, driver.id)}
+                                    disabled={assigning === (req.id ?? '')}
+                                    onClick={() => handleAssign(req.id ?? '', driver.id)}
                                   >
-                                    {assigning === req.id ? '...' : 'Assigner'}
+                                    {assigning === (req.id ?? '') ? '...' : 'Assigner'}
                                   </Button>
                                 </div>
                               </div>
                             ))}
                           </div>
                         )}
-                        {feedback[req.id] && (
+                        {feedback[req.id ?? ''] && (
                           <p className={`text-xs mt-2 font-medium ${
-                            feedback[req.id].startsWith('✓') ? 'text-green-600' : 'text-red-500'
+                            feedback[req.id ?? ''].startsWith('✓') ? 'text-green-600' : 'text-red-500'
                           }`}>
-                            {feedback[req.id]}
+                            {feedback[req.id ?? '']}
                           </p>
                         )}
                       </div>

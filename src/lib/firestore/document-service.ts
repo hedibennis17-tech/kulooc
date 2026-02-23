@@ -90,6 +90,7 @@ export const DOCUMENT_CATALOG: Record<DocumentType, {
   acceptedFormats: string;
   maxSizeMB: number;
   provinceSpecific?: string;
+  expiryMonths?: number;
   tips: string[];
 }> = {
   permis_conduire: {

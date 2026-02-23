@@ -1,148 +1,185 @@
 'use client';
-
+/**
+ * KULOOC — Hook useDispatch
+ * Centralise les données et actions du dispatcher :
+ * - Chauffeurs actifs, demandes en attente, courses actives
+ * - Assignation manuelle, mise à jour de statut
+ * - Métriques en temps réel
+ */
 import { useState, useEffect, useCallback } from 'react';
-import { getFirestore } from 'firebase/firestore';
-import { getApp } from 'firebase/app';
 import {
-  subscribeToDrivers,
-  subscribeToRideRequests,
-  subscribeToActiveRides,
-  calculateSurge,
-  manualAssignDriver,
-  updateRideStatus,
-  seedDemoData,
-} from './dispatch-service';
-import type {
-  DispatchDriver,
-  RideRequest,
-  ActiveRide,
-  DispatchMetrics,
-} from './types';
+  collection, query, where, orderBy, limit,
+  onSnapshot, doc, updateDoc, addDoc, setDoc,
+  serverTimestamp, getDocs,
+} from 'firebase/firestore';
+import { db } from '@/firebase';
+import { getDispatchEngine } from './dispatch-engine';
+import type { DispatchDriver, RideRequest, ActiveRide } from './types';
 
-export function useDispatch() {
+interface DispatchMetrics {
+  pendingRequests: number;
+  activeRides: number;
+  activeDrivers: number;
+  onlineDrivers: number;
+  totalEarningsToday: number;
+  completedToday: number;
+}
+
+interface UseDispatchReturn {
+  drivers: DispatchDriver[];
+  rideRequests: RideRequest[];
+  activeRides: ActiveRide[];
+  metrics: DispatchMetrics;
+  surgeMultiplier: number;
+  isLoading: boolean;
+  assignDriver: (requestId: string, driverId: string) => Promise<{ success: boolean; error?: string }>;
+  autoAssign: (requestId: string) => Promise<{ success: boolean; error?: string }>;
+  autoAssigning: string | null;
+  updateStatus: (rideId: string, status: string) => Promise<void>;
+  loadDemoData: () => Promise<void>;
+}
+
+export function useDispatch(): UseDispatchReturn {
   const [drivers, setDrivers] = useState<DispatchDriver[]>([]);
   const [rideRequests, setRideRequests] = useState<RideRequest[]>([]);
   const [activeRides, setActiveRides] = useState<ActiveRide[]>([]);
-  const [metrics, setMetrics] = useState<DispatchMetrics>({
-    activeDrivers: 0,
-    onlineDrivers: 0,
-    pendingRequests: 0,
-    activeRides: 0,
-    completedToday: 0,
-    avgWaitTimeSeconds: 0,
-    avgRating: 0,
-    surgeZones: 0,
-    revenue: 0,
-  });
-  const [isLoading, setIsLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [surgeMultiplier, setSurgeMultiplier] = useState(1.0);
+  const [isLoading, setIsLoading] = useState(false);
+  const [autoAssigning, setAutoAssigning] = useState<string | null>(null);
 
-  const getDb = useCallback(() => {
+  // ─── Écouter les chauffeurs actifs ─────────────────────────────────────────
+  useEffect(() => {
+    const q = query(
+      collection(db, 'drivers'),
+      where('status', 'in', ['online', 'en-route', 'on-trip', 'busy'])
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setDrivers(snap.docs.map((d) => ({ id: d.id, ...d.data() } as DispatchDriver)));
+    }, (err) => {
+      console.warn('useDispatch drivers:', err.message);
+    });
+    return () => unsub();
+  }, []);
+
+  // ─── Écouter les demandes en attente ───────────────────────────────────────
+  useEffect(() => {
+    const q = query(
+      collection(db, 'ride_requests'),
+      where('status', 'in', ['pending', 'searching']),
+      orderBy('requestedAt', 'asc'),
+      limit(50)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setRideRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as RideRequest)));
+    }, (err) => {
+      console.warn('useDispatch requests:', err.message);
+    });
+    return () => unsub();
+  }, []);
+
+  // ─── Écouter les courses actives ───────────────────────────────────────────
+  useEffect(() => {
+    const q = query(
+      collection(db, 'active_rides'),
+      where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress']),
+      limit(100)
+    );
+    const unsub = onSnapshot(q, (snap) => {
+      setActiveRides(snap.docs.map((d) => ({ id: d.id, ...d.data() } as ActiveRide)));
+    }, (err) => {
+      console.warn('useDispatch activeRides:', err.message);
+    });
+    return () => unsub();
+  }, []);
+
+  // ─── Métriques calculées ───────────────────────────────────────────────────
+  const metrics: DispatchMetrics = {
+    pendingRequests: rideRequests.length,
+    activeRides: activeRides.length,
+    activeDrivers: drivers.filter((d) => d.status !== 'offline').length,
+    onlineDrivers: drivers.filter((d) => d.status === 'online').length,
+    totalEarningsToday: activeRides.reduce((sum, r) => sum + (r.pricing?.total || 0), 0),
+    completedToday: 0,
+  };
+
+  // ─── Indice de surge ───────────────────────────────────────────────────────
+  const surgeMultiplier = (() => {
+    const ratio = metrics.onlineDrivers > 0
+      ? metrics.pendingRequests / metrics.onlineDrivers
+      : 0;
+    if (ratio > 3) return 2.0;
+    if (ratio > 2) return 1.5;
+    if (ratio > 1) return 1.2;
+    return 1.0;
+  })();
+
+  // ─── Assignation manuelle ──────────────────────────────────────────────────
+  const assignDriver = useCallback(async (requestId: string, driverId: string): Promise<{ success: boolean; error?: string }> => {
+    const driver = drivers.find((d) => d.id === driverId);
+    if (!driver) return { success: false, error: 'Chauffeur introuvable' };
     try {
-      return getFirestore(getApp());
-    } catch {
-      return null;
+      const engine = getDispatchEngine(db);
+      const result = await engine.acceptOffer(requestId, driverId, driver.name, driver.location ?? null);
+      return result;
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Erreur inconnue' };
+    }
+  }, [drivers]);
+
+  // ─── Assignation automatique ──────────────────────────────────────────────
+  const autoAssign = useCallback(async (requestId: string): Promise<{ success: boolean; error?: string }> => {
+    setAutoAssigning(requestId);
+    try {
+      const engine = getDispatchEngine(db);
+      // Charger la demande depuis Firestore puis la traiter
+      const { getDoc, doc } = await import('firebase/firestore');
+      const snap = await getDoc(doc(db, 'ride_requests', requestId));
+      if (!snap.exists()) return { success: false, error: 'Demande introuvable' };
+      const request = { id: snap.id, ...snap.data() } as any;
+      await engine.processRequest(request);
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Erreur inconnue' };
+    } finally {
+      setAutoAssigning(null);
     }
   }, []);
 
-  useEffect(() => {
-    const db = getDb();
-    if (!db) {
-      setIsLoading(false);
-      return;
-    }
-
-    const unsubs: (() => void)[] = [];
-
-    // Subscribe to drivers
-    unsubs.push(
-      subscribeToDrivers(db, (data) => {
-        setDrivers(data);
-        setIsLoading(false);
-      })
-    );
-
-    // Subscribe to ride requests
-    unsubs.push(
-      subscribeToRideRequests(db, (data) => {
-        setRideRequests(data);
-      })
-    );
-
-    // Subscribe to active rides
-    unsubs.push(
-      subscribeToActiveRides(db, (data) => {
-        setActiveRides(data);
-      })
-    );
-
-    return () => unsubs.forEach((u) => u());
-  }, [getDb]);
-
-  // Compute metrics whenever data changes
-  useEffect(() => {
-    const onlineDrivers = drivers.filter((d) => d.status === 'online').length;
-    const activeDrivers = drivers.filter((d) =>
-      ['online', 'en-route', 'on-trip', 'busy'].includes(d.status)
-    ).length;
-
-    const avgRating =
-      drivers.length > 0
-        ? drivers.reduce((sum, d) => sum + (d.averageRating || 0), 0) / drivers.length
-        : 0;
-
-    const surge = calculateSurge(rideRequests.length, onlineDrivers, surgeMultiplier);
-    setSurgeMultiplier(surge);
-
-    const totalRevenue = activeRides.reduce(
-      (sum, r) => sum + (r.pricing?.total || 0),
-      0
-    );
-
-    setMetrics({
-      activeDrivers,
-      onlineDrivers,
-      pendingRequests: rideRequests.filter((r) => r.status === 'pending').length,
-      activeRides: activeRides.length,
-      completedToday: 0, // Would need a separate query for today's completed rides
-      avgWaitTimeSeconds: 0,
-      avgRating: +avgRating.toFixed(2),
-      surgeZones: surge > 1.1 ? 1 : 0,
-      revenue: +totalRevenue.toFixed(2),
+  // ─── Mise à jour de statut ─────────────────────────────────────────────────
+  const updateStatus = useCallback(async (rideId: string, status: string) => {
+    await updateDoc(doc(db, 'active_rides', rideId), {
+      status,
+      updatedAt: serverTimestamp(),
     });
-  }, [drivers, rideRequests, activeRides]);
+  }, []);
 
-  const assignDriver = useCallback(
-    async (requestId: string, driverId: string) => {
-      const db = getDb();
-      if (!db) return { success: false, error: 'Firebase non disponible' };
-      return manualAssignDriver(db, requestId, driverId);
-    },
-    [getDb]
-  );
-
-  const updateStatus = useCallback(
-    async (rideId: string, status: ActiveRide['status']) => {
-      const db = getDb();
-      if (!db) return;
-      await updateRideStatus(db, rideId, status);
-    },
-    [getDb]
-  );
-
+  // ─── Charger des données de démo ──────────────────────────────────────────
   const loadDemoData = useCallback(async () => {
-    const db = getDb();
-    if (!db) return;
     setIsLoading(true);
     try {
-      await seedDemoData(db);
-    } catch (e: any) {
-      setError(e.message);
+      const MONTREAL_CENTER = { lat: 45.5019, lng: -73.5674 };
+      const demoDrivers = [
+        { name: 'Jean-François Tremblay', status: 'online', averageRating: 4.9, totalRides: 342, acceptanceRate: 0.94, vehicleType: 'car', vehicle: { make: 'Toyota', model: 'Camry', year: 2022, licensePlate: 'ABC-1234', color: 'Blanc', type: 'car' } },
+        { name: 'Marie-Claude Gagnon', status: 'online', averageRating: 4.8, totalRides: 218, acceptanceRate: 0.91, vehicleType: 'suv', vehicle: { make: 'Honda', model: 'CR-V', year: 2023, licensePlate: 'DEF-5678', color: 'Gris', type: 'suv' } },
+        { name: 'Ahmed Benali', status: 'en-route', averageRating: 4.7, totalRides: 156, acceptanceRate: 0.88, vehicleType: 'car', vehicle: { make: 'Hyundai', model: 'Elantra', year: 2021, licensePlate: 'GHI-9012', color: 'Noir', type: 'car' } },
+      ];
+      for (const driver of demoDrivers) {
+        const driverId = `demo_driver_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+        await setDoc(doc(db, 'drivers', driverId), {
+          ...driver,
+          isOnline: true,
+          location: {
+            latitude: MONTREAL_CENTER.lat + (Math.random() - 0.5) * 0.05,
+            longitude: MONTREAL_CENTER.lng + (Math.random() - 0.5) * 0.05,
+          },
+          onlineSince: serverTimestamp(),
+          lastSeen: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      }
     } finally {
       setIsLoading(false);
     }
-  }, [getDb]);
+  }, []);
 
   return {
     drivers,
@@ -151,8 +188,9 @@ export function useDispatch() {
     metrics,
     surgeMultiplier,
     isLoading,
-    error,
     assignDriver,
+    autoAssign,
+    autoAssigning,
     updateStatus,
     loadDemoData,
   };

@@ -23,7 +23,7 @@ export function FavoriteAddresses({ onSelect }: FavoriteAddressesProps) {
   const { user } = useUser();
   const [favorites, setFavorites] = useState<FavoriteAddress[]>([]);
   const [isAdding, setIsAdding] = useState(false);
-  const [newAddress, setNewAddress] = useState({ label: '', address: '', icon: 'heart' as const });
+  const [newAddress, setNewAddress] = useState<{ label: string; address: string; icon: 'home' | 'work' | 'heart' }>({ label: '', address: '', icon: 'home' });
 
   useEffect(() => {
     if (user) {
@@ -67,7 +67,7 @@ export function FavoriteAddresses({ onSelect }: FavoriteAddressesProps) {
     };
     
     saveFavorites([...favorites, favorite]);
-    setNewAddress({ label: '', address: '', icon: 'heart' });
+    setNewAddress({ label: '', address: '', icon: 'home' });
     setIsAdding(false);
   };
 

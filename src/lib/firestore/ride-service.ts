@@ -66,13 +66,25 @@ export type ActiveRide = {
   requestId: string;
   passengerId: string;
   passengerName: string;
+  passengerPhone?: string;
   driverId: string;
   driverName: string;
   driverLocation?: { latitude: number; longitude: number };
   pickup: GeoPoint;
   destination: GeoPoint;
+  destinationAddress?: string;
+  pickupAddress?: string;
   serviceType: string;
   status: RideStatus;
+  estimatedPrice?: number;
+  estimatedDistanceKm?: number;
+  estimatedDurationMin?: number;
+  finalPrice?: number;
+  actualDurationMin?: number;
+  driverEarnings?: number;
+  platformFee?: number;
+  driverRating?: { rating: number; comment: string } | null;
+  passengerRating?: { rating: number; comment: string } | null;
   pricing: {
     base: number;
     perKm: number;

@@ -234,7 +234,7 @@ export function DispatchMap({
 
           {/* Marqueurs destinations des courses actives */}
           {activeRides.map((ride) => {
-            const loc = ride.destination?.location || (ride.destination as any);
+            const loc = (ride.destination as any)?.location || ride.destination;
             if (!loc?.latitude) return null;
             return (
               <AdvancedMarker
