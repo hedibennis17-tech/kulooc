@@ -50,8 +50,10 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-      allow create: if isOwner(userId) && request.resource.data.id == userId;
-      allow update: if isOwnerOfExistingDoc(userId) && isImmutable('id') || isAdmin();
+      // Création : l'utilisateur connecté peut créer son propre profil (sans contrainte sur le champ id)
+      allow create: if isOwner(userId);
+      // Mise à jour : le propriétaire peut modifier son propre doc (existant ou nouveau via setDoc merge)
+      allow update: if isOwner(userId) || isAdmin();
       allow delete: if isOwnerOfExistingDoc(userId) || isAdmin();
     }
 

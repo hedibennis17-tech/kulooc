@@ -133,16 +133,24 @@ export function watchActiveRide(
 
 /**
  * Récupère l'historique des courses d'un passager.
+ * Utilise un index composite (passengerId ASC + completedAt DESC).
+ * En cas d'erreur d'index manquant, retourne un tableau vide sans bloquer l'UI.
  */
 export async function getClientRideHistory(passengerId: string, maxRides = 20) {
-  const q = query(
-    collection(db, 'completed_rides'),
-    where('passengerId', '==', passengerId),
-    orderBy('completedAt', 'desc'),
-    limit(maxRides)
-  );
-  const snap = await getDocs(q);
-  return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  try {
+    const q = query(
+      collection(db, 'completed_rides'),
+      where('passengerId', '==', passengerId),
+      orderBy('completedAt', 'desc'),
+      limit(maxRides)
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  } catch (err: any) {
+    // Index en cours de construction ou permissions — retourner vide sans crasher
+    console.warn('getClientRideHistory:', err?.message || err);
+    return [];
+  }
 }
 
 /**

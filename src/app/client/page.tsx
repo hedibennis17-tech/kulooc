@@ -14,13 +14,14 @@ import {
   Zap, Shield, Leaf
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { APIProvider, Map, AdvancedMarker, Pin } from '@vis.gl/react-google-maps';
 
 const SERVICE_TYPES = [
   {
     id: 'kulooc_x',
     name: 'KULOOC X',
     description: 'Économique',
-    icon: <Car className="w-6 h-6" />,
+    icon: <Car className="w-5 h-5" />,
     multiplier: 1.0,
     eta: '3-5 min',
     color: 'bg-gray-900',
@@ -28,8 +29,8 @@ const SERVICE_TYPES = [
   {
     id: 'kulooc_comfort',
     name: 'Confort',
-    description: 'Plus d\'espace',
-    icon: <Star className="w-6 h-6" />,
+    description: "Plus d'espace",
+    icon: <Star className="w-5 h-5" />,
     multiplier: 1.4,
     eta: '5-8 min',
     color: 'bg-blue-900',
@@ -37,8 +38,8 @@ const SERVICE_TYPES = [
   {
     id: 'kulooc_xl',
     name: 'XL',
-    description: 'Jusqu\'à 6 passagers',
-    icon: <Shield className="w-6 h-6" />,
+    description: "Jusqu'à 6 passagers",
+    icon: <Shield className="w-5 h-5" />,
     multiplier: 1.8,
     eta: '6-10 min',
     color: 'bg-purple-900',
@@ -47,7 +48,7 @@ const SERVICE_TYPES = [
     id: 'kulooc_green',
     name: 'Green',
     description: 'Véhicule électrique',
-    icon: <Leaf className="w-6 h-6" />,
+    icon: <Leaf className="w-5 h-5" />,
     multiplier: 1.2,
     eta: '4-7 min',
     color: 'bg-green-900',
@@ -56,13 +57,51 @@ const SERVICE_TYPES = [
 
 const BASE_PRICE = 4.50;
 const PRICE_PER_KM = 1.85;
+const MONTREAL_CENTER = { lat: 45.5019, lng: -73.5674 };
 
-function estimatePrice(serviceMultiplier: number): { price: number; distance: number; duration: number } {
-  // Simulation d'une course typique à Montréal
-  const distance = Math.random() * 10 + 2; // 2-12 km
-  const duration = Math.round(distance * 3 + Math.random() * 5); // minutes
+function estimatePrice(serviceMultiplier: number) {
+  const distance = 5 + Math.random() * 7;
+  const duration = Math.round(distance * 3 + Math.random() * 5);
   const price = (BASE_PRICE + distance * PRICE_PER_KM) * serviceMultiplier;
-  return { price, distance, duration };
+  return { price, distance: Math.round(distance * 10) / 10, duration };
+}
+
+// Composant carte Google Maps pour l'interface client
+function ClientMapView({ apiKey }: { apiKey: string }) {
+  const [userPos, setUserPos] = useState(MONTREAL_CENTER);
+
+  useEffect(() => {
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        () => {} // Fallback silencieux sur Montréal
+      );
+    }
+  }, []);
+
+  return (
+    <APIProvider apiKey={apiKey} libraries={['geometry']}>
+      <div className="w-full h-full">
+        <Map
+          defaultCenter={MONTREAL_CENTER}
+          center={userPos}
+          defaultZoom={13}
+          mapId="a22506a8155b4369"
+          disableDefaultUI={true}
+          zoomControl={true}
+          gestureHandling="greedy"
+          className="w-full h-full"
+        >
+          <AdvancedMarker position={userPos} title="Votre position">
+            <div className="relative flex items-center justify-center">
+              <div className="absolute w-8 h-8 rounded-full bg-red-500/30 animate-ping" />
+              <div className="w-5 h-5 rounded-full bg-red-600 border-2 border-white shadow-lg" />
+            </div>
+          </AdvancedMarker>
+        </Map>
+      </div>
+    </APIProvider>
+  );
 }
 
 export default function ClientHomePage() {
@@ -75,11 +114,10 @@ export default function ClientHomePage() {
   const [activeRide, setActiveRide] = useState<any>(null);
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
   const selectedServiceData = SERVICE_TYPES.find(s => s.id === selectedService)!;
-  const estimate = estimatePrice(selectedServiceData.multiplier);
 
-  // Écouter les courses actives en temps réel
   useEffect(() => {
     if (!user) return;
     const unsub = watchActiveRide(user.uid, (ride) => {
@@ -111,7 +149,7 @@ export default function ClientHomePage() {
         serviceType: selectedService,
         estimatedPrice: Math.round(est.price * 100) / 100,
         estimatedDuration: est.duration,
-        estimatedDistance: Math.round(est.distance * 10) / 10,
+        estimatedDistance: est.distance,
       });
       setCurrentRequestId(requestId);
       setStep('waiting');
@@ -124,41 +162,41 @@ export default function ClientHomePage() {
   };
 
   const handleCancel = async () => {
-    if (currentRequestId) {
-      await cancelRideRequest(currentRequestId).catch(() => {});
-    }
+    if (currentRequestId) await cancelRideRequest(currentRequestId).catch(() => {});
     setStep('search');
     setCurrentRequestId(null);
     setPickup('');
     setDestination('');
   };
 
+  const est = estimatePrice(selectedServiceData.multiplier);
+
   return (
     <div className="flex flex-col h-full">
-      {/* Map placeholder */}
-      <div className="relative bg-gray-100 h-56 flex items-center justify-center overflow-hidden">
-        <div className="absolute inset-0 bg-gradient-to-b from-gray-200 to-gray-100" />
-        <div className="relative z-10 text-center">
-          <MapPin className="w-8 h-8 text-red-600 mx-auto mb-2" />
-          <p className="text-gray-500 text-sm">Carte interactive</p>
-          <p className="text-gray-400 text-xs">Montréal, QC</p>
-        </div>
-        {/* Grille de rue simulée */}
-        <svg className="absolute inset-0 w-full h-full opacity-20" viewBox="0 0 400 200">
-          {[0,50,100,150,200].map(y => <line key={y} x1="0" y1={y} x2="400" y2={y} stroke="#666" strokeWidth="1"/>)}
-          {[0,80,160,240,320,400].map(x => <line key={x} x1={x} y1="0" x2={x} y2="200" stroke="#666" strokeWidth="1"/>)}
-        </svg>
+      {/* Carte Google Maps */}
+      <div className="relative h-52 bg-gray-100 overflow-hidden">
+        {apiKey ? (
+          <ClientMapView apiKey={apiKey} />
+        ) : (
+          <div className="flex items-center justify-center h-full bg-gray-100">
+            <div className="text-center">
+              <MapPin className="w-8 h-8 text-red-600 mx-auto mb-2" />
+              <p className="text-gray-500 text-sm">Montréal, QC</p>
+            </div>
+          </div>
+        )}
+        {/* Overlay gradient en bas pour lisibilité */}
+        <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none" />
       </div>
 
       {/* Contenu principal */}
-      <div className="flex-1 bg-white px-4 pt-4 pb-2">
+      <div className="flex-1 bg-white px-4 pt-3 pb-2 overflow-y-auto">
 
         {/* ── ÉTAPE 1 : Recherche ── */}
         {step === 'search' && (
           <div className="space-y-3">
             <h2 className="text-xl font-bold text-gray-900">Où allez-vous ?</h2>
 
-            {/* Départ */}
             <div className="relative">
               <div className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 bg-black rounded-full" />
               <Input
@@ -169,7 +207,6 @@ export default function ClientHomePage() {
               />
             </div>
 
-            {/* Destination */}
             <div className="relative">
               <div className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 bg-red-600 rounded-sm" />
               <Input
@@ -202,7 +239,7 @@ export default function ClientHomePage() {
             </div>
 
             <Button
-              className="w-full h-12 bg-black hover:bg-gray-800 text-white font-semibold rounded-xl mt-2"
+              className="w-full h-12 bg-black hover:bg-gray-800 text-white font-semibold rounded-xl"
               onClick={handleSearch}
               disabled={!pickup || !destination}
             >
@@ -220,7 +257,7 @@ export default function ClientHomePage() {
                 <X className="w-5 h-5" />
               </button>
               <div className="flex-1">
-                <p className="text-xs text-gray-400">{pickup}</p>
+                <p className="text-xs text-gray-400 truncate">{pickup}</p>
                 <p className="text-sm font-semibold text-gray-900 truncate">{destination}</p>
               </div>
             </div>
@@ -229,7 +266,7 @@ export default function ClientHomePage() {
 
             <div className="space-y-2">
               {SERVICE_TYPES.map(service => {
-                const est = estimatePrice(service.multiplier);
+                const e = estimatePrice(service.multiplier);
                 const isSelected = selectedService === service.id;
                 return (
                   <button
@@ -248,8 +285,8 @@ export default function ClientHomePage() {
                       <p className="text-xs text-gray-400">{service.description} · {service.eta}</p>
                     </div>
                     <div className="text-right">
-                      <p className="font-bold text-gray-900">${est.price.toFixed(2)}</p>
-                      <p className="text-xs text-gray-400">{Math.round(est.distance * 10) / 10} km</p>
+                      <p className="font-bold text-gray-900">${e.price.toFixed(2)}</p>
+                      <p className="text-xs text-gray-400">{e.distance} km</p>
                     </div>
                     {isSelected && <CheckCircle className="w-5 h-5 text-black flex-shrink-0" />}
                   </button>
@@ -260,11 +297,11 @@ export default function ClientHomePage() {
             <div className="bg-gray-50 rounded-xl p-3 flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <Clock className="w-4 h-4" />
-                <span>Arrivée estimée : {selectedServiceData.eta}</span>
+                <span>{selectedServiceData.eta}</span>
               </div>
               <div className="flex items-center gap-1 text-sm font-bold">
                 <DollarSign className="w-4 h-4 text-green-600" />
-                <span>{estimate.price.toFixed(2)} CAD</span>
+                <span>{est.price.toFixed(2)} CAD</span>
               </div>
             </div>
 
@@ -274,7 +311,7 @@ export default function ClientHomePage() {
               disabled={isLoading}
             >
               {isLoading ? (
-                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Recherche en cours...</>
+                <><Loader2 className="w-4 h-4 mr-2 animate-spin" />Recherche...</>
               ) : (
                 <><Zap className="w-4 h-4 mr-2" />Commander {selectedServiceData.name}</>
               )}
@@ -282,7 +319,7 @@ export default function ClientHomePage() {
           </div>
         )}
 
-        {/* ── ÉTAPE 3 : En attente d'un chauffeur ── */}
+        {/* ── ÉTAPE 3 : En attente ── */}
         {step === 'waiting' && (
           <div className="space-y-4 text-center py-4">
             <div className="relative mx-auto w-20 h-20">
@@ -294,7 +331,6 @@ export default function ClientHomePage() {
               <h3 className="text-lg font-bold text-gray-900">Recherche d'un chauffeur</h3>
               <p className="text-gray-400 text-sm mt-1">Connexion avec un chauffeur KULOOC proche...</p>
             </div>
-
             <Card className="bg-gray-50 border-0">
               <CardContent className="p-4 space-y-2 text-left">
                 <div className="flex items-center gap-2 text-sm">
@@ -308,23 +344,12 @@ export default function ClientHomePage() {
                 </div>
               </CardContent>
             </Card>
-
             <div className="flex items-center justify-center gap-4 text-sm text-gray-500">
-              <span className="flex items-center gap-1">
-                <Clock className="w-4 h-4" />{selectedServiceData.eta}
-              </span>
-              <span className="flex items-center gap-1">
-                <DollarSign className="w-4 h-4 text-green-600" />{estimate.price.toFixed(2)} CAD
-              </span>
+              <span className="flex items-center gap-1"><Clock className="w-4 h-4" />{selectedServiceData.eta}</span>
+              <span className="flex items-center gap-1"><DollarSign className="w-4 h-4 text-green-600" />{est.price.toFixed(2)} CAD</span>
             </div>
-
-            <Button
-              variant="outline"
-              className="w-full border-red-200 text-red-600 hover:bg-red-50"
-              onClick={handleCancel}
-            >
-              <X className="w-4 h-4 mr-2" />
-              Annuler la course
+            <Button variant="outline" className="w-full border-red-200 text-red-600 hover:bg-red-50" onClick={handleCancel}>
+              <X className="w-4 h-4 mr-2" />Annuler la course
             </Button>
           </div>
         )}
@@ -336,11 +361,9 @@ export default function ClientHomePage() {
               <CheckCircle className="w-6 h-6 text-green-600 flex-shrink-0" />
               <div>
                 <p className="font-semibold text-green-800 text-sm">Chauffeur en route !</p>
-                <p className="text-green-600 text-xs">Votre chauffeur arrive dans {selectedServiceData.eta}</p>
+                <p className="text-green-600 text-xs">Arrivée dans {selectedServiceData.eta}</p>
               </div>
             </div>
-
-            {/* Info chauffeur */}
             <Card className="border-gray-200">
               <CardContent className="p-4">
                 <div className="flex items-center gap-3">
@@ -354,20 +377,12 @@ export default function ClientHomePage() {
                       <span className="text-xs text-gray-500">{activeRide.driverRating || '4.9'}</span>
                     </div>
                   </div>
-                  <Badge className="bg-gray-900 text-white text-xs">
-                    {activeRide.vehiclePlate || 'ABC-123'}
-                  </Badge>
+                  <Badge className="bg-gray-900 text-white text-xs">{activeRide.vehiclePlate || 'ABC-123'}</Badge>
                 </div>
               </CardContent>
             </Card>
-
-            <Button
-              variant="outline"
-              className="w-full border-red-200 text-red-600 hover:bg-red-50"
-              onClick={handleCancel}
-            >
-              <X className="w-4 h-4 mr-2" />
-              Annuler
+            <Button variant="outline" className="w-full border-red-200 text-red-600 hover:bg-red-50" onClick={handleCancel}>
+              <X className="w-4 h-4 mr-2" />Annuler
             </Button>
           </div>
         )}
