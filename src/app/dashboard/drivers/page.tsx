@@ -42,6 +42,7 @@ interface Driver {
 }
 
 const statusConfig: Record<string, { label: string; color: string; dot: string }> = {
+  // Statuts admin (dashboard)
   active: { label: 'Actif', color: 'bg-green-900 text-green-300', dot: 'bg-green-400' },
   inactive: { label: 'Inactif', color: 'bg-gray-800 text-gray-300', dot: 'bg-gray-400' },
   standby: { label: 'En attente', color: 'bg-yellow-900 text-yellow-300', dot: 'bg-yellow-400' },
@@ -50,6 +51,12 @@ const statusConfig: Record<string, { label: string; color: string; dot: string }
   confirmed: { label: 'Confirmé', color: 'bg-blue-900 text-blue-300', dot: 'bg-blue-400' },
   investigating: { label: 'Enquête', color: 'bg-purple-900 text-purple-300', dot: 'bg-purple-400' },
   pending: { label: 'En attente', color: 'bg-yellow-900 text-yellow-300', dot: 'bg-yellow-400' },
+  // Statuts temps réel (app chauffeur)
+  online: { label: 'En ligne', color: 'bg-green-900 text-green-300', dot: 'bg-green-400 animate-pulse' },
+  'en-route': { label: 'En route', color: 'bg-blue-900 text-blue-300', dot: 'bg-blue-400 animate-pulse' },
+  'on-trip': { label: 'En course', color: 'bg-purple-900 text-purple-300', dot: 'bg-purple-400 animate-pulse' },
+  busy: { label: 'Occupé', color: 'bg-orange-900 text-orange-300', dot: 'bg-orange-400' },
+  offline: { label: 'Hors ligne', color: 'bg-gray-800 text-gray-400', dot: 'bg-gray-500' },
 };
 
 const tierConfig: Record<string, { label: string; color: string }> = {
@@ -142,9 +149,13 @@ export default function DriversPage() {
     } catch (err) { toast({ title: 'Erreur', variant: 'destructive' }); }
   };
 
+  // Un chauffeur est considéré actif s'il a le statut admin 'active' OU le statut temps réel 'online'/'en-route'/'on-trip'
+  const isDriverActive = (status: string) =>
+    ['active', 'online', 'en-route', 'on-trip', 'busy'].includes(status);
+
   const stats = {
     total: drivers.length,
-    active: drivers.filter(d => d.status === 'active').length,
+    active: drivers.filter(d => isDriverActive(d.status)).length,
     standby: drivers.filter(d => d.status === 'standby').length,
     blocked: drivers.filter(d => d.status === 'blocked').length,
     pendingDocs: drivers.filter(d => Object.values(d.documents).some(s => s === 'pending')).length,

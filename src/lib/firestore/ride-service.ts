@@ -246,10 +246,15 @@ export async function updateDriverStatus(
   const updates: Record<string, unknown> = {
     status,
     updatedAt: serverTimestamp(),
+    lastSeen: serverTimestamp(),
+    isOnline: status !== 'offline',
   };
 
   if (status === 'online') updates.onlineSince = serverTimestamp();
-  if (status === 'offline') updates.onlineSince = null;
+  if (status === 'offline') {
+    updates.onlineSince = null;
+    updates.location = null;
+  }
 
   await updateDoc(doc(db, 'drivers', driverId), updates);
 }
