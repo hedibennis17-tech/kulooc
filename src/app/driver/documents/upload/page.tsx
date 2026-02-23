@@ -12,32 +12,32 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Upload, CheckCircle2, FileText, AlertCircle } from 'lucide-react';
+import { Loader2, Upload, CheckCircle2, FileText, AlertCircle, Wrench, Shield, Clipboard, CreditCard, Car, Camera } from 'lucide-react';
 import { Progress } from '@/components/ui/progress';
 import { Badge } from '@/components/ui/badge';
 
 const DOCUMENT_CATEGORIES = [
   {
     id: 'inspection',
-    name: 'Inspection mécanique',
-    description: 'Certificat d'inspection mécanique valide',
-    icon: '🔧',
+    name: 'Inspection mecanique',
+    description: 'Certificat inspection mecanique valide',
+    icon: Wrench,
     required: true,
     hasExpiration: true,
   },
   {
     id: 'insurance',
     name: 'Assurance',
-    description: 'Preuve d'assurance automobile',
-    icon: '🛡️',
+    description: 'Preuve assurance automobile',
+    icon: Shield,
     required: true,
     hasExpiration: true,
   },
   {
     id: 'background_check',
-    name: 'Vérification des antécédents',
-    description: 'Vérification des antécédents criminels et dossier de conduite',
-    icon: '📋',
+    name: 'Verification des antecedents',
+    description: 'Verification antecedents criminels et dossier de conduite',
+    icon: Clipboard,
     required: true,
     hasExpiration: false,
   },
@@ -45,31 +45,31 @@ const DOCUMENT_CATEGORIES = [
     id: 'drivers_license',
     name: 'Permis de conduire',
     description: 'Photo recto et verso du permis',
-    icon: '🪪',
+    icon: CreditCard,
     required: true,
     hasExpiration: true,
   },
   {
     id: 'vehicle_registration',
-    name: 'Enregistrement du véhicule',
-    description: 'Certificat d'immatriculation',
-    icon: '📄',
+    name: 'Enregistrement du vehicule',
+    description: 'Certificat immatriculation',
+    icon: FileText,
     required: true,
     hasExpiration: true,
   },
   {
     id: 'license_plate',
-    name: 'Plaque d'immatriculation',
-    description: 'Photo de la plaque du véhicule',
-    icon: '🚗',
+    name: 'Plaque immatriculation',
+    description: 'Photo de la plaque du vehicule',
+    icon: Car,
     required: true,
     hasExpiration: false,
   },
   {
     id: 'vehicle_photos',
-    name: 'Photos du véhicule',
-    description: 'Photos avant, arrière, côtés gauche/droit, intérieur',
-    icon: '📸',
+    name: 'Photos du vehicule',
+    description: 'Photos avant, arriere, cotes gauche/droit, interieur',
+    icon: Camera,
     required: true,
     hasExpiration: false,
   },
@@ -77,7 +77,7 @@ const DOCUMENT_CATEGORIES = [
 
 const PROVINCIAL_REQUIREMENTS = {
   QC: {
-    name: 'Québec',
+    name: 'Quebec',
     licenseClass: 'Classe 4A',
     minInsurance: '2M$',
     inspectionFrequency: 'Annuelle',
@@ -95,7 +95,7 @@ const PROVINCIAL_REQUIREMENTS = {
     inspectionFrequency: 'Annuelle',
   },
   NS: {
-    name: 'Nouvelle-Écosse',
+    name: 'Nouvelle-Ecosse',
     licenseClass: 'Classe 4',
     minInsurance: '1M$',
     inspectionFrequency: 'Annuelle',
@@ -159,18 +159,16 @@ export default function DriverDocumentsUploadPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const selectedFile = e.target.files?.[0];
     if (selectedFile) {
-      // Vérifier le type de fichier
       const allowedTypes = ['image/jpeg', 'image/png', 'image/jpg', 'application/pdf'];
       if (!allowedTypes.includes(selectedFile.type)) {
         toast({
-          title: 'Type de fichier non supporté',
+          title: 'Type de fichier non supporte',
           description: 'Veuillez uploader une image (JPG, PNG) ou un PDF.',
           variant: 'destructive',
         });
         return;
       }
       
-      // Vérifier la taille (max 10MB)
       if (selectedFile.size > 10 * 1024 * 1024) {
         toast({
           title: 'Fichier trop volumineux',
@@ -188,7 +186,7 @@ export default function DriverDocumentsUploadPage() {
     if (!selectedCategory || !file || !user) {
       toast({
         title: 'Informations manquantes',
-        description: 'Veuillez sélectionner une catégorie et un fichier.',
+        description: 'Veuillez selectionner une categorie et un fichier.',
         variant: 'destructive',
       });
       return;
@@ -197,8 +195,8 @@ export default function DriverDocumentsUploadPage() {
     const category = DOCUMENT_CATEGORIES.find(c => c.id === selectedCategory);
     if (category?.hasExpiration && !expirationDate) {
       toast({
-        title: 'Date d'expiration requise',
-        description: 'Veuillez entrer la date d'expiration du document.',
+        title: 'Date expiration requise',
+        description: 'Veuillez entrer la date expiration du document.',
         variant: 'destructive',
       });
       return;
@@ -206,7 +204,6 @@ export default function DriverDocumentsUploadPage() {
     
     setIsLoading(true);
     try {
-      // Upload du fichier vers Firebase Storage
       const fileExtension = file.name.split('.').pop();
       const fileName = `${selectedCategory}_${Date.now()}.${fileExtension}`;
       const storageRef = ref(storage, `drivers/${user.uid}/documents/${fileName}`);
@@ -214,7 +211,6 @@ export default function DriverDocumentsUploadPage() {
       await uploadBytes(storageRef, file);
       const downloadURL = await getDownloadURL(storageRef);
       
-      // Créer l'entrée dans Firestore
       await addDoc(collection(db, 'driver_documents'), {
         driverId: user.uid,
         type: selectedCategory,
@@ -226,16 +222,14 @@ export default function DriverDocumentsUploadPage() {
       });
       
       toast({
-        title: '✅ Document uploadé !',
-        description: 'Votre document est en cours de vérification.',
+        title: 'Document uploade',
+        description: 'Votre document est en cours de verification.',
       });
       
-      // Réinitialiser le formulaire
       setSelectedCategory('');
       setFile(null);
       setExpirationDate('');
       
-      // Recharger les documents
       await loadUploadedDocuments();
     } catch (error: any) {
       toast({
@@ -254,13 +248,13 @@ export default function DriverDocumentsUploadPage() {
     
     switch (doc.status) {
       case 'approved':
-        return { status: 'approved', label: 'Approuvé', color: 'bg-green-500' };
+        return { status: 'approved', label: 'Approuve', color: 'bg-green-500' };
       case 'pending':
         return { status: 'pending', label: 'En attente', color: 'bg-yellow-500' };
       case 'rejected':
-        return { status: 'rejected', label: 'Rejeté', color: 'bg-red-500' };
+        return { status: 'rejected', label: 'Rejete', color: 'bg-red-500' };
       case 'expired':
-        return { status: 'expired', label: 'Expiré', color: 'bg-red-600' };
+        return { status: 'expired', label: 'Expire', color: 'bg-red-600' };
       default:
         return { status: 'missing', label: 'Manquant', color: 'bg-gray-500' };
     }
@@ -275,22 +269,20 @@ export default function DriverDocumentsUploadPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-red-50 via-white to-red-50 p-4">
       <div className="max-w-4xl mx-auto py-8">
-        {/* Header */}
         <div className="text-center mb-8">
           <div className="flex items-center justify-center gap-3 mb-4">
             <span className="text-5xl">🇨🇦</span>
             <h1 className="text-3xl font-bold text-red-600">KULOOC</h1>
           </div>
           <p className="text-gray-600 font-medium">Gestion des documents</p>
-          <p className="text-sm text-gray-500">100% Canadian Production 🍁</p>
+          <p className="text-sm text-gray-500">100% Canadian Production</p>
         </div>
 
-        {/* Progress */}
         <Card className="mb-6 border-2 border-red-100">
           <CardContent className="pt-6">
             <div className="space-y-2">
               <div className="flex justify-between text-sm text-gray-600">
-                <span>Documents approuvés: {completedDocuments} / {totalDocuments}</span>
+                <span>Documents approuves: {completedDocuments} / {totalDocuments}</span>
                 <span>{Math.round(progress)}%</span>
               </div>
               <Progress value={progress} className="h-2" />
@@ -298,7 +290,6 @@ export default function DriverDocumentsUploadPage() {
           </CardContent>
         </Card>
 
-        {/* Exigences provinciales */}
         {provincialReq && (
           <Card className="mb-6 border-2 border-blue-100 bg-blue-50">
             <CardHeader>
@@ -326,18 +317,18 @@ export default function DriverDocumentsUploadPage() {
           </Card>
         )}
 
-        {/* Liste des documents requis */}
         <Card className="mb-6 border-2 border-red-100">
           <CardHeader>
             <CardTitle>Documents requis</CardTitle>
             <CardDescription>
-              Cliquez sur une catégorie pour uploader un document
+              Cliquez sur une categorie pour uploader un document
             </CardDescription>
           </CardHeader>
           <CardContent>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {DOCUMENT_CATEGORIES.map((category) => {
                 const status = getCategoryStatus(category.id);
+                const IconComponent = category.icon;
                 return (
                   <div
                     key={category.id}
@@ -350,7 +341,7 @@ export default function DriverDocumentsUploadPage() {
                   >
                     <div className="flex items-start justify-between mb-2">
                       <div className="flex items-center gap-2">
-                        <span className="text-2xl">{category.icon}</span>
+                        <IconComponent className="h-6 w-6 text-red-600" />
                         <div>
                           <h3 className="font-semibold text-sm">{category.name}</h3>
                           <p className="text-xs text-gray-600">{category.description}</p>
@@ -370,15 +361,21 @@ export default function DriverDocumentsUploadPage() {
           </CardContent>
         </Card>
 
-        {/* Formulaire d'upload */}
         {selectedCategory && (
           <Card className="border-2 border-red-100 shadow-xl">
             <CardHeader className="bg-gradient-to-r from-red-600 to-red-700 text-white rounded-t-lg">
               <CardTitle className="text-xl flex items-center gap-2">
-                <span className="text-2xl">
-                  {DOCUMENT_CATEGORIES.find(c => c.id === selectedCategory)?.icon}
-                </span>
-                {DOCUMENT_CATEGORIES.find(c => c.id === selectedCategory)?.name}
+                {(() => {
+                  const category = DOCUMENT_CATEGORIES.find(c => c.id === selectedCategory);
+                  if (!category) return null;
+                  const IconComponent = category.icon;
+                  return (
+                    <>
+                      <IconComponent className="h-6 w-6" />
+                      {category.name}
+                    </>
+                  );
+                })()}
               </CardTitle>
               <CardDescription className="text-red-100">
                 {DOCUMENT_CATEGORIES.find(c => c.id === selectedCategory)?.description}
@@ -405,7 +402,7 @@ export default function DriverDocumentsUploadPage() {
 
               {DOCUMENT_CATEGORIES.find(c => c.id === selectedCategory)?.hasExpiration && (
                 <div className="space-y-2">
-                  <Label htmlFor="expiration">Date d'expiration *</Label>
+                  <Label htmlFor="expiration">Date expiration *</Label>
                   <Input
                     id="expiration"
                     type="date"
@@ -450,14 +447,13 @@ export default function DriverDocumentsUploadPage() {
           </Card>
         )}
 
-        {/* Actions */}
         <div className="mt-8 flex gap-4">
           <Button
             variant="outline"
             onClick={() => router.push('/driver')}
             className="flex-1"
           >
-            ← Retour au tableau de bord
+            Retour au tableau de bord
           </Button>
           {completedDocuments === totalDocuments && (
             <Button
@@ -465,7 +461,7 @@ export default function DriverDocumentsUploadPage() {
               className="flex-1 bg-green-600 hover:bg-green-700"
             >
               <CheckCircle2 className="mr-2 h-5 w-5" />
-              Tous les documents sont uploadés !
+              Tous les documents sont uploades
             </Button>
           )}
         </div>
