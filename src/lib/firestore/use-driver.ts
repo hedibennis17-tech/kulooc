@@ -65,6 +65,10 @@ export function useDriver(): UseDriverReturn {
 
   const isOnline = driverStatus !== 'offline';
 
+  // Ref pour accéder à activeRide dans le callback GPS sans re-créer le watcher
+  const activeRideRef = useRef<typeof activeRide>(null);
+  useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
+
   // ─── Écouter les demandes en attente ─────────────────────────────────────
   useEffect(() => {
     if (!isOnline || !user) return;
@@ -122,7 +126,16 @@ export function useDriver(): UseDriverReturn {
           };
           setCurrentLocation(loc);
           try {
+            // Mettre à jour la position dans drivers/{uid}
             await updateDriverLocation(user.uid, loc);
+
+            // Si une course active existe, mettre à jour aussi la position du chauffeur dans active_rides
+            if (activeRideRef.current?.id) {
+              await updateDoc(doc(db, 'active_rides', activeRideRef.current.id), {
+                driverLocation: loc,
+                updatedAt: serverTimestamp(),
+              });
+            }
           } catch (e) {
             // Silently fail GPS updates
           }

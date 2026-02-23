@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
+import { Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,7 @@ interface RideRequestsPanelProps {
   requests: RideRequest[];
   drivers: DispatchDriver[];
   onAssign: (requestId: string, driverId: string) => Promise<{ success: boolean; error?: string }>;
+  onAutoAssign?: (requestId: string) => Promise<void>;
 }
 
 const statusColors: Record<string, string> = {
@@ -60,10 +62,27 @@ function getBestDrivers(request: RideRequest, drivers: DispatchDriver[], top = 3
     .slice(0, top);
 }
 
-export function RideRequestsPanel({ requests, drivers, onAssign }: RideRequestsPanelProps) {
+export function RideRequestsPanel({ requests, drivers, onAssign, onAutoAssign }: RideRequestsPanelProps) {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [assigning, setAssigning] = useState<string | null>(null);
+  const [autoAssigning, setAutoAssigning] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<Record<string, string>>({});
+
+  const handleAutoAssign = async (requestId: string) => {
+    if (!onAutoAssign) return;
+    setAutoAssigning(requestId);
+    try {
+      await onAutoAssign(requestId);
+      setFeedback((prev) => ({ ...prev, [requestId]: '\u2713 Assign\u00e9 automatiquement' }));
+    } catch (e: any) {
+      setFeedback((prev) => ({ ...prev, [requestId]: `\u2717 ${e.message}` }));
+    } finally {
+      setAutoAssigning(null);
+      setTimeout(() => {
+        setFeedback((prev) => { const n = { ...prev }; delete n[requestId]; return n; });
+      }, 3000);
+    }
+  };
 
   const handleAssign = async (requestId: string, driverId: string) => {
     setAssigning(requestId);
@@ -142,6 +161,20 @@ export function RideRequestsPanel({ requests, drivers, onAssign }: RideRequestsP
                             <span className="text-xs text-orange-500 font-medium">
                               ×{req.surgeMultiplier.toFixed(1)} surge
                             </span>
+                          )}
+                          {onAutoAssign && req.status === 'pending' && (
+                            <Button
+                              size="sm"
+                              className="h-6 text-xs px-2 bg-red-600 hover:bg-red-700 text-white mt-0.5"
+                              disabled={autoAssigning === req.id}
+                              onClick={(e) => { e.stopPropagation(); handleAutoAssign(req.id); }}
+                            >
+                              {autoAssigning === req.id ? (
+                                <span className="inline-block animate-spin">⚡</span>
+                              ) : (
+                                <><Zap className="w-3 h-3 mr-0.5" />Auto</>
+                              )}
+                            </Button>
                           )}
                         </div>
                       </div>
