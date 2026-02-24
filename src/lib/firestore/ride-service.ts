@@ -1,7 +1,14 @@
 /**
- * KULOOC — Service Firestore pour les courses
+ * KULOOC — Service Firestore pour les courses v2
+ * ─────────────────────────────────────────────────────────────────────────────
  * Gère le cycle de vie complet d'une course:
  * Passager → Demande → Matching → Chauffeur accepte → En route → Terminé
+ *
+ * Corrections v2 :
+ *   - subscribeToDriverActiveRide : détecte les courses récemment terminées (8s)
+ *   - subscribeToPassengerActiveRide : détecte les courses récemment terminées (8s)
+ *   - subscribeToPassengerRide (realtime) : détecte les courses récemment terminées (5s)
+ *   - subscribeToDriverPendingRequests : inclut le statut 'offered' pour les offres
  */
 
 import {
@@ -28,6 +35,7 @@ import { db } from '@/firebase';
 export type RideStatus =
   | 'pending'           // En attente d'un chauffeur
   | 'searching'         // Recherche en cours
+  | 'offered'           // Offre envoyée à un chauffeur (60s timeout)
   | 'driver-assigned'   // Chauffeur assigné, en route vers passager
   | 'driver-arrived'    // Chauffeur arrivé au point de prise en charge
   | 'in-progress'       // Course en cours
@@ -47,7 +55,7 @@ export type RideRequest = {
   passengerPhone?: string;
   pickup: GeoPoint;
   destination: GeoPoint;
-  serviceType: string;    // kulooc_x, kulooc_green, etc.
+  serviceType: string;
   estimatedPrice: number;
   estimatedDistanceKm: number;
   estimatedDurationMin: number;
@@ -59,6 +67,8 @@ export type RideRequest = {
   driverName?: string;
   notes?: string;
   paymentMethod?: string;
+  offeredToDriverId?: string;
+  offerExpiresAt?: Timestamp;
 };
 
 export type ActiveRide = {
@@ -87,10 +97,12 @@ export type ActiveRide = {
   passengerRating?: { rating: number; comment: string } | null;
   pricing: {
     base: number;
-    perKm: number;
-    perMin: number;
-    distanceKm: number;
-    durationMin: number;
+    perKm?: number;
+    perKmCharge?: number;
+    perMin?: number;
+    perMinCharge?: number;
+    distanceKm?: number;
+    durationMin?: number;
     surgeMultiplier: number;
     subtotal: number;
     tax: number;
@@ -99,6 +111,7 @@ export type ActiveRide = {
   assignedAt?: Timestamp;
   startedAt?: Timestamp;
   completedAt?: Timestamp;
+  rideCompletedAt?: Timestamp;
   polyline?: string;
 };
 
@@ -140,7 +153,7 @@ export function subscribeToRideRequest(
   });
 }
 
-// ─── Écouter la course active (Passager + Chauffeur) ─────────────────────────
+// ─── Écouter la course active (par ID) ───────────────────────────────────────
 
 export function subscribeToActiveRide(
   rideId: string,
@@ -156,22 +169,44 @@ export function subscribeToActiveRide(
 }
 
 // ─── Écouter les courses actives d'un passager ───────────────────────────────
+// Détecte aussi les courses récemment terminées (dans les 8 dernières secondes)
+// pour que l'UI puisse afficher l'état "terminé" avant que le doc disparaisse.
 
 export function subscribeToPassengerActiveRide(
   passengerId: string,
   callback: (ride: ActiveRide | null) => void
 ): Unsubscribe {
-  const q = query(
+  const COMPLETION_WINDOW_MS = 8000; // 8 secondes
+
+  // Requête principale : courses actives
+  const activeQ = query(
     collection(db, 'active_rides'),
     where('passengerId', '==', passengerId),
-    where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress']),
+    where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress', 'completed']),
     limit(1)
   );
 
-  return onSnapshot(q, (snap) => {
+  return onSnapshot(activeQ, (snap) => {
     if (!snap.empty) {
-      const doc = snap.docs[0];
-      callback({ id: doc.id, ...doc.data() } as ActiveRide);
+      const d = snap.docs[0];
+      const ride = { id: d.id, ...d.data() } as ActiveRide;
+
+      // Si la course est terminée, la retourner brièvement puis null
+      if (ride.status === 'completed') {
+        const completedAt = (ride.rideCompletedAt || ride.completedAt) as Timestamp | undefined;
+        const completedMs = completedAt?.toMillis?.() ?? Date.now();
+        const age = Date.now() - completedMs;
+
+        if (age < COMPLETION_WINDOW_MS) {
+          callback(ride);
+          // Après la fenêtre, signaler null
+          setTimeout(() => callback(null), COMPLETION_WINDOW_MS - age);
+        } else {
+          callback(null);
+        }
+      } else {
+        callback(ride);
+      }
     } else {
       callback(null);
     }
@@ -179,13 +214,14 @@ export function subscribeToPassengerActiveRide(
 }
 
 // ─── Écouter les demandes en attente pour un chauffeur ───────────────────────
+// Inclut 'offered' pour que le chauffeur voie les offres qui lui sont destinées
 
 export function subscribeToDriverPendingRequests(
   callback: (requests: RideRequest[]) => void
 ): Unsubscribe {
   const q = query(
     collection(db, 'ride_requests'),
-    where('status', '==', 'pending'),
+    where('status', 'in', ['pending', 'offered']),
     orderBy('requestedAt', 'asc'),
     limit(10)
   );
@@ -197,22 +233,40 @@ export function subscribeToDriverPendingRequests(
 }
 
 // ─── Écouter la course active d'un chauffeur ─────────────────────────────────
+// Détecte aussi les courses récemment terminées (dans les 8 dernières secondes)
 
 export function subscribeToDriverActiveRide(
   driverId: string,
   callback: (ride: ActiveRide | null) => void
 ): Unsubscribe {
+  const COMPLETION_WINDOW_MS = 8000;
+
   const q = query(
     collection(db, 'active_rides'),
     where('driverId', '==', driverId),
-    where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress']),
+    where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress', 'completed']),
     limit(1)
   );
 
   return onSnapshot(q, (snap) => {
     if (!snap.empty) {
       const d = snap.docs[0];
-      callback({ id: d.id, ...d.data() } as ActiveRide);
+      const ride = { id: d.id, ...d.data() } as ActiveRide;
+
+      if (ride.status === 'completed') {
+        const completedAt = (ride.rideCompletedAt || ride.completedAt) as Timestamp | undefined;
+        const completedMs = completedAt?.toMillis?.() ?? Date.now();
+        const age = Date.now() - completedMs;
+
+        if (age < COMPLETION_WINDOW_MS) {
+          callback(ride);
+          setTimeout(() => callback(null), COMPLETION_WINDOW_MS - age);
+        } else {
+          callback(null);
+        }
+      } else {
+        callback(ride);
+      }
     } else {
       callback(null);
     }
@@ -269,7 +323,6 @@ export async function updateDriverStatus(
     updates.location = null;
   }
 
-  // setDoc avec merge:true crée le document s'il n'existe pas encore
   await setDoc(doc(db, 'drivers', driverId), updates, { merge: true });
 }
 
@@ -292,7 +345,7 @@ export function calculateRidePrice(params: {
   const PER_KM = 1.75;
   const PER_MIN = 0.35;
   const MIN_FARE = 7.00;
-  const TAX_RATE = 0.14975; // TPS + TVQ Québec
+  const TAX_RATE = 0.14975;
 
   const { distanceKm, durationMin, serviceMultiplier, surgeMultiplier } = params;
 

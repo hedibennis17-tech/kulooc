@@ -95,6 +95,7 @@ export function useRide(): UseRideReturn {
     const map: Record<RideStatus, RideFlowState> = {
       'pending': 'searching',
       'searching': 'searching',
+      'offered': 'searching',
       'driver-assigned': 'driver-assigned',
       'driver-arrived': 'driver-arrived',
       'in-progress': 'in-progress',

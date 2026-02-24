@@ -1,16 +1,22 @@
 'use client';
 /**
- * KULOOC Dispatch Engine
- * Moteur d'assignation automatique en temps réel
- * - File d'attente par zone (H3-like grid 1km²)
- * - Chauffeur le plus proche + le plus longtemps en attente
- * - Timeout 60s → chauffeur suivant
- * - Notification push au chauffeur via Firestore
+ * KULOOC Dispatch Engine v2
+ * ─────────────────────────────────────────────────────────────────────────────
+ * SOURCE UNIQUE DE VÉRITÉ pour l'assignation des courses.
+ *
+ * Règles fondamentales :
+ *   1. Un seul moteur actif à la fois (singleton + flag `started`)
+ *   2. Le moteur est la seule entité qui crée des documents `active_rides`
+ *   3. Flux offre : pending → offered (60 s) → prochain chauffeur ou fallback
+ *   4. Fallback : si aucun chauffeur dans le rayon, essayer TOUT chauffeur online
+ *   5. directAssign : pour le panneau de dispatch manuel (bypass de l'offre)
+ *   6. acceptOffer : appelé par use-driver.ts quand le chauffeur accepte
+ *   7. declineOffer : appelé par use-driver.ts quand le chauffeur refuse
  */
 import {
   collection, doc, query, where, onSnapshot,
   runTransaction, serverTimestamp, updateDoc,
-  addDoc, getDoc, setDoc, Timestamp,
+  setDoc, getDoc, Timestamp,
   type Firestore,
 } from 'firebase/firestore';
 
@@ -61,39 +67,35 @@ export interface DispatchRequest {
 // ─── Sélection du meilleur chauffeur ─────────────────────────────────────────
 function selectBestDriver(
   request: DispatchRequest,
-  drivers: DispatchDriver[]
+  drivers: DispatchDriver[],
+  maxRadiusKm = 30
 ): DispatchDriver | null {
   const available = drivers.filter(
-    (d) =>
-      (d.status === 'online') &&
-      d.location &&
-      !d.currentRideId
+    (d) => d.status === 'online' && d.location && !d.currentRideId
   );
   if (available.length === 0) return null;
 
   const pickupLat = request.pickup.latitude;
   const pickupLng = request.pickup.longitude;
 
-  // Score = 50% temps d'attente + 30% distance + 20% note
   const scored = available.map((d) => {
     const distKm = haversineKm(
       d.location!.latitude, d.location!.longitude,
       pickupLat, pickupLng
     );
-    if (distKm > 30) return null; // Trop loin
+    if (distKm > maxRadiusKm) return null;
 
-    // Temps en ligne (en secondes depuis onlineSince)
     const waitSeconds = d.onlineSince
       ? (Date.now() / 1000) - (d.onlineSince as Timestamp).seconds
       : 0;
 
-    const distScore = Math.max(0, 1 - distKm / 15);        // 15km max
-    const waitScore = Math.min(1, waitSeconds / 3600);       // 1h = score max
+    const distScore = Math.max(0, 1 - distKm / 15);
+    const waitScore = Math.min(1, waitSeconds / 3600);
     const ratingScore = (d.averageRating || 4.5) / 5;
 
     const total = 0.50 * waitScore + 0.30 * distScore + 0.20 * ratingScore;
-    return { driver: d, distKm, waitSeconds, score: total };
-  }).filter(Boolean) as Array<{ driver: DispatchDriver; distKm: number; waitSeconds: number; score: number }>;
+    return { driver: d, distKm, score: total };
+  }).filter(Boolean) as Array<{ driver: DispatchDriver; distKm: number; score: number }>;
 
   if (scored.length === 0) return null;
   scored.sort((a, b) => b.score - a.score);
@@ -103,18 +105,21 @@ function selectBestDriver(
 // ─── Moteur principal ─────────────────────────────────────────────────────────
 export class DispatchEngine {
   private db: Firestore;
+  private started = false;                                    // Guard singleton
   private unsubRequests: (() => void) | null = null;
   private unsubDrivers: (() => void) | null = null;
   private drivers: DispatchDriver[] = [];
-  private requests: DispatchRequest[] = [];
-  private processingIds = new Set<string>(); // Éviter double-traitement
-  private offerTimeouts = new Map<string, NodeJS.Timeout>(); // requestId → timeout
+  private processingIds = new Set<string>();
+  private offerTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
 
   constructor(db: Firestore) {
     this.db = db;
   }
 
   start() {
+    if (this.started) return;                                 // Empêche double-démarrage
+    this.started = true;
+
     // Écouter les chauffeurs en ligne
     const driversQ = query(
       collection(this.db, 'drivers'),
@@ -130,14 +135,12 @@ export class DispatchEngine {
       where('status', '==', 'pending')
     );
     this.unsubRequests = onSnapshot(requestsQ, (snap) => {
-      const newRequests = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DispatchRequest));
-      this.requests = newRequests;
-      // Traiter chaque nouvelle demande
       snap.docChanges().forEach((change) => {
         if (change.type === 'added') {
           const req = { id: change.doc.id, ...change.doc.data() } as DispatchRequest;
           if (!this.processingIds.has(req.id)) {
-            setTimeout(() => this.processRequest(req), 500); // Petit délai pour laisser Firestore se stabiliser
+            // Délai court pour laisser Firestore se stabiliser
+            setTimeout(() => this.processRequest(req), 500);
           }
         }
       });
@@ -150,17 +153,18 @@ export class DispatchEngine {
     this.offerTimeouts.forEach((t) => clearTimeout(t));
     this.offerTimeouts.clear();
     this.processingIds.clear();
+    this.started = false;
   }
 
+  /** Déclencher manuellement le traitement d'une demande (ex: depuis useDispatch) */
   public async processRequest(request: DispatchRequest) {
     if (this.processingIds.has(request.id)) return;
     this.processingIds.add(request.id);
-
     await this.offerToNextDriver(request.id, []);
   }
 
   private async offerToNextDriver(requestId: string, excludedDriverIds: string[]) {
-    // Recharger la demande pour vérifier son statut
+    // Recharger la demande pour vérifier son statut actuel
     const reqSnap = await getDoc(doc(this.db, 'ride_requests', requestId));
     if (!reqSnap.exists() || reqSnap.data().status !== 'pending') {
       this.processingIds.delete(requestId);
@@ -168,19 +172,33 @@ export class DispatchEngine {
     }
     const request = { id: reqSnap.id, ...reqSnap.data() } as DispatchRequest;
 
-    // Filtrer les chauffeurs déjà refusés
+    // Filtrer les chauffeurs déjà exclus
     const availableDrivers = this.drivers.filter(
       (d) => !excludedDriverIds.includes(d.id)
     );
 
-    const best = selectBestDriver(request, availableDrivers);
+    // 1er essai : rayon 30 km
+    let best = selectBestDriver(request, availableDrivers, 30);
+
+    // Fallback : si aucun dans le rayon, prendre n'importe quel chauffeur online
     if (!best) {
-      // Aucun chauffeur disponible — laisser en pending
-      this.processingIds.delete(requestId);
+      best = selectBestDriver(request, availableDrivers, 99999);
+    }
+
+    if (!best) {
+      // Aucun chauffeur disponible — laisser en pending, réessayer dans 30s
+      setTimeout(() => {
+        this.processingIds.delete(requestId);
+        // Re-vérifier si toujours pending
+        getDoc(doc(this.db, 'ride_requests', requestId)).then((snap) => {
+          if (snap.exists() && snap.data().status === 'pending') {
+            this.processRequest({ id: snap.id, ...snap.data() } as DispatchRequest);
+          }
+        });
+      }, 30000);
       return;
     }
 
-    // Offrir la course au chauffeur via Firestore
     const offerExpiresAt = new Date(Date.now() + 60000); // 60 secondes
     try {
       await updateDoc(doc(this.db, 'ride_requests', requestId), {
@@ -188,11 +206,11 @@ export class DispatchEngine {
         offeredToDriverName: (best as any).driverName || best.name || 'Chauffeur',
         offerExpiresAt: Timestamp.fromDate(offerExpiresAt),
         offerSentAt: serverTimestamp(),
-        status: 'offered', // Nouveau statut : offre envoyée
+        status: 'offered',
         updatedAt: serverTimestamp(),
       });
 
-      // Créer une notification dans la collection du chauffeur
+      // Notification dans driver_offers
       await setDoc(doc(this.db, 'driver_offers', `${requestId}_${best.id}`), {
         requestId,
         driverId: best.id,
@@ -204,7 +222,7 @@ export class DispatchEngine {
         estimatedPrice: request.estimatedPrice,
         estimatedDistanceKm: request.estimatedDistanceKm,
         estimatedDurationMin: request.estimatedDurationMin,
-        status: 'pending', // pending → accepted / declined
+        status: 'pending',
         expiresAt: Timestamp.fromDate(offerExpiresAt),
         createdAt: serverTimestamp(),
       });
@@ -212,36 +230,41 @@ export class DispatchEngine {
       // Timeout 60s : si pas de réponse → chauffeur suivant
       const timeout = setTimeout(async () => {
         this.offerTimeouts.delete(requestId);
-        // Vérifier si toujours en attente
         const snap = await getDoc(doc(this.db, 'ride_requests', requestId));
         if (snap.exists() && snap.data().status === 'offered') {
-          // Remettre en pending et essayer le prochain
           await updateDoc(doc(this.db, 'ride_requests', requestId), {
             status: 'pending',
             offeredToDriverId: null,
             offerExpiresAt: null,
             updatedAt: serverTimestamp(),
           });
-          // Marquer l'offre comme expirée
-          await updateDoc(doc(this.db, 'driver_offers', `${requestId}_${best.id}`), {
+          await updateDoc(doc(this.db, 'driver_offers', `${requestId}_${best!.id}`), {
             status: 'expired',
           }).catch(() => {});
-          // Réessayer avec le prochain chauffeur
-          await this.offerToNextDriver(requestId, [...excludedDriverIds, best.id]);
+          await this.offerToNextDriver(requestId, [...excludedDriverIds, best!.id]);
         }
       }, 60000);
 
       this.offerTimeouts.set(requestId, timeout);
-    } catch (e) {
+    } catch {
       this.processingIds.delete(requestId);
     }
   }
 
-  // Appelé quand un chauffeur accepte
-  async acceptOffer(requestId: string, driverId: string, driverName: string | undefined | null, driverLocation: { latitude: number; longitude: number } | null | undefined) {
-    // Protéger contre les valeurs undefined qui causent une erreur Firestore
+  /**
+   * Appelé par use-driver.ts quand le chauffeur accepte l'offre.
+   * C'est la SEULE méthode qui crée un document active_rides via transaction atomique.
+   */
+  async acceptOffer(
+    requestId: string,
+    driverId: string,
+    driverName: string | undefined | null,
+    driverLocation: { latitude: number; longitude: number } | null | undefined
+  ): Promise<{ success: boolean; error?: string }> {
     const safeName = driverName || 'Chauffeur';
     const safeLocation = driverLocation ?? null;
+
+    // Annuler le timeout d'expiration
     const timeout = this.offerTimeouts.get(requestId);
     if (timeout) {
       clearTimeout(timeout);
@@ -256,8 +279,14 @@ export class DispatchEngine {
 
         if (!reqSnap.exists()) throw new Error('Demande introuvable');
         const reqData = reqSnap.data();
-        if (reqData.status !== 'offered' && reqData.status !== 'pending') throw new Error('Demande déjà assignée');
-        if (reqData.offeredToDriverId && reqData.offeredToDriverId !== driverId) throw new Error('Offre destinée à un autre chauffeur');
+
+        // Accepter si statut est offered OU pending (robustesse)
+        if (!['offered', 'pending'].includes(reqData.status)) {
+          throw new Error('Demande déjà assignée');
+        }
+        if (reqData.offeredToDriverId && reqData.offeredToDriverId !== driverId) {
+          throw new Error('Offre destinée à un autre chauffeur');
+        }
 
         const rideRef = doc(collection(this.db, 'active_rides'));
         tx.set(rideRef, {
@@ -309,7 +338,6 @@ export class DispatchEngine {
         }
       });
 
-      // Marquer l'offre comme acceptée
       await updateDoc(doc(this.db, 'driver_offers', `${requestId}_${driverId}`), {
         status: 'accepted',
       }).catch(() => {});
@@ -321,20 +349,20 @@ export class DispatchEngine {
     }
   }
 
-  // Appelé quand un chauffeur refuse
-  async declineOffer(requestId: string, driverId: string) {
+  /**
+   * Appelé par use-driver.ts quand le chauffeur refuse l'offre.
+   */
+  async declineOffer(requestId: string, driverId: string): Promise<void> {
     const timeout = this.offerTimeouts.get(requestId);
     if (timeout) {
       clearTimeout(timeout);
       this.offerTimeouts.delete(requestId);
     }
 
-    // Marquer l'offre comme refusée
     await updateDoc(doc(this.db, 'driver_offers', `${requestId}_${driverId}`), {
       status: 'declined',
     }).catch(() => {});
 
-    // Remettre en pending et chercher le prochain
     await updateDoc(doc(this.db, 'ride_requests', requestId), {
       status: 'pending',
       offeredToDriverId: null,
@@ -342,15 +370,102 @@ export class DispatchEngine {
       updatedAt: serverTimestamp(),
     });
 
-    // Chercher le prochain chauffeur (exclure celui qui a refusé)
     const reqSnap = await getDoc(doc(this.db, 'ride_requests', requestId));
     if (reqSnap.exists()) {
-      const excludedFromPrev = reqSnap.data().declinedByDriverIds || [];
+      const excludedFromPrev: string[] = reqSnap.data().declinedByDriverIds || [];
       const newExcluded = [...excludedFromPrev, driverId];
       await updateDoc(doc(this.db, 'ride_requests', requestId), {
         declinedByDriverIds: newExcluded,
       });
       await this.offerToNextDriver(requestId, newExcluded);
+    }
+  }
+
+  /**
+   * Assignation directe depuis le panneau de dispatch (bypass de l'offre).
+   * Utilisé par useDispatch.assignDriver() pour l'assignation manuelle.
+   */
+  async directAssign(
+    requestId: string,
+    driverId: string,
+    driverName: string,
+    driverLocation: { latitude: number; longitude: number } | null
+  ): Promise<{ success: boolean; error?: string }> {
+    // Annuler toute offre en cours
+    const timeout = this.offerTimeouts.get(requestId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.offerTimeouts.delete(requestId);
+    }
+
+    try {
+      await runTransaction(this.db, async (tx) => {
+        const reqRef = doc(this.db, 'ride_requests', requestId);
+        const drvRef = doc(this.db, 'drivers', driverId);
+        const [reqSnap, drvSnap] = await Promise.all([tx.get(reqRef), tx.get(drvRef)]);
+
+        if (!reqSnap.exists()) throw new Error('Demande introuvable');
+        const reqData = reqSnap.data();
+
+        if (!['pending', 'offered', 'searching'].includes(reqData.status)) {
+          throw new Error(`Demande déjà assignée (statut: ${reqData.status})`);
+        }
+
+        const rideRef = doc(collection(this.db, 'active_rides'));
+        tx.set(rideRef, {
+          requestId,
+          passengerId: reqData.passengerId || '',
+          passengerName: reqData.passengerName || 'Passager',
+          passengerPhone: reqData.passengerPhone || '',
+          driverId,
+          driverName,
+          driverLocation,
+          pickup: reqData.pickup,
+          destination: reqData.destination,
+          serviceType: reqData.serviceType || 'KULOOC X',
+          estimatedPrice: reqData.estimatedPrice || 0,
+          estimatedDistanceKm: reqData.estimatedDistanceKm || 0,
+          estimatedDurationMin: reqData.estimatedDurationMin || 0,
+          surgeMultiplier: reqData.surgeMultiplier || 1.0,
+          status: 'driver-assigned',
+          pricing: {
+            subtotal: +((reqData.estimatedPrice || 0) / 1.14975).toFixed(2),
+            tax: +((reqData.estimatedPrice || 0) - (reqData.estimatedPrice || 0) / 1.14975).toFixed(2),
+            total: reqData.estimatedPrice || 0,
+            surgeMultiplier: reqData.surgeMultiplier || 1.0,
+          },
+          assignedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          rideStartedAt: null,
+          rideCompletedAt: null,
+          finalPrice: null,
+          driverRating: null,
+          passengerRating: null,
+          assignedManually: true,
+        });
+
+        tx.update(reqRef, {
+          status: 'driver-assigned',
+          driverId,
+          driverName,
+          assignedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          activeRideId: rideRef.id,
+        });
+
+        if (drvSnap.exists()) {
+          tx.update(drvRef, {
+            status: 'en-route',
+            currentRideId: rideRef.id,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      });
+
+      this.processingIds.delete(requestId);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: e.message };
     }
   }
 }
