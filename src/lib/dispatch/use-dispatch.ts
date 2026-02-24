@@ -5,12 +5,13 @@
  * - Chauffeurs actifs, demandes en attente, courses actives
  * - Assignation manuelle, mise à jour de statut
  * - Métriques en temps réel
+ * - Moteur de dispatch automatique démarré ici
  */
 import { useState, useEffect, useCallback } from 'react';
 import {
   collection, query, where, orderBy, limit,
-  onSnapshot, doc, updateDoc, addDoc, setDoc,
-  serverTimestamp, getDocs,
+  onSnapshot, doc, updateDoc, setDoc, getDoc,
+  serverTimestamp, runTransaction,
 } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { getDispatchEngine } from './dispatch-engine';
@@ -46,6 +47,18 @@ export function useDispatch(): UseDispatchReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [autoAssigning, setAutoAssigning] = useState<string | null>(null);
 
+  // ─── Démarrer le moteur de dispatch automatique ────────────────────────────
+  // Le moteur écoute ride_requests en temps réel et assigne automatiquement
+  useEffect(() => {
+    const engine = getDispatchEngine(db);
+    engine.start();
+    return () => {
+      // Ne pas stopper le moteur au démontage du composant dispatch
+      // car il doit continuer à tourner tant que quelqu'un est connecté
+      // engine.stop(); // Commenté intentionnellement
+    };
+  }, []);
+
   // ─── Écouter les chauffeurs actifs ─────────────────────────────────────────
   useEffect(() => {
     const q = query(
@@ -64,7 +77,7 @@ export function useDispatch(): UseDispatchReturn {
   useEffect(() => {
     const q = query(
       collection(db, 'ride_requests'),
-      where('status', 'in', ['pending', 'searching']),
+      where('status', 'in', ['pending', 'offered', 'searching']),
       orderBy('requestedAt', 'asc'),
       limit(50)
     );
@@ -112,31 +125,106 @@ export function useDispatch(): UseDispatchReturn {
     return 1.0;
   })();
 
-  // ─── Assignation manuelle ──────────────────────────────────────────────────
+  // ─── Assignation manuelle (bypass du moteur) ───────────────────────────────
+  // On écrit directement dans Firestore sans passer par le moteur
+  // pour éviter les problèmes de singleton et de drivers non chargés
   const assignDriver = useCallback(async (requestId: string, driverId: string): Promise<{ success: boolean; error?: string }> => {
     const driver = drivers.find((d) => d.id === driverId);
     if (!driver) return { success: false, error: 'Chauffeur introuvable' };
     try {
-      const engine = getDispatchEngine(db);
       const driverName = (driver as any).driverName || (driver as any).name || (driver as any).displayName || 'Chauffeur';
-      const driverLoc = (driver as any).currentLocation || driver.location || null;
-      const result = await engine.acceptOffer(requestId, driverId, driverName, driverLoc);
-      return result;
+      const driverLoc = (driver as any).currentLocation || (driver as any).location || null;
+
+      await runTransaction(db, async (tx) => {
+        const reqRef = doc(db, 'ride_requests', requestId);
+        const drvRef = doc(db, 'drivers', driverId);
+        const [reqSnap, drvSnap] = await Promise.all([tx.get(reqRef), tx.get(drvRef)]);
+
+        if (!reqSnap.exists()) throw new Error('Demande introuvable');
+        const reqData = reqSnap.data();
+
+        // Accepter même si statut est 'offered' ou 'pending'
+        if (!['pending', 'offered', 'searching'].includes(reqData.status)) {
+          throw new Error(`Demande déjà assignée (statut: ${reqData.status})`);
+        }
+
+        const { collection: col } = await import('firebase/firestore');
+        const rideRef = doc(col(db, 'active_rides'));
+
+        tx.set(rideRef, {
+          requestId,
+          passengerId: reqData.passengerId || '',
+          passengerName: reqData.passengerName || 'Passager',
+          passengerPhone: reqData.passengerPhone || '',
+          driverId,
+          driverName,
+          driverLocation: driverLoc,
+          pickup: reqData.pickup,
+          destination: reqData.destination,
+          serviceType: reqData.serviceType || 'KULOOC X',
+          estimatedPrice: reqData.estimatedPrice || 0,
+          estimatedDistanceKm: reqData.estimatedDistanceKm || 0,
+          estimatedDurationMin: reqData.estimatedDurationMin || 0,
+          surgeMultiplier: reqData.surgeMultiplier || 1.0,
+          status: 'driver-assigned',
+          pricing: {
+            subtotal: +((reqData.estimatedPrice || 0) / 1.14975).toFixed(2),
+            tax: +((reqData.estimatedPrice || 0) - (reqData.estimatedPrice || 0) / 1.14975).toFixed(2),
+            total: reqData.estimatedPrice || 0,
+            surgeMultiplier: reqData.surgeMultiplier || 1.0,
+          },
+          assignedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          rideStartedAt: null,
+          rideCompletedAt: null,
+          finalPrice: null,
+          driverRating: null,
+          passengerRating: null,
+          assignedManually: true,
+        });
+
+        tx.update(reqRef, {
+          status: 'driver-assigned',
+          driverId,
+          driverName,
+          assignedAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+          activeRideId: rideRef.id,
+        });
+
+        if (drvSnap.exists()) {
+          tx.update(drvRef, {
+            status: 'en-route',
+            currentRideId: rideRef.id,
+            updatedAt: serverTimestamp(),
+          });
+        }
+      });
+
+      return { success: true };
     } catch (err: any) {
+      console.error('assignDriver error:', err);
       return { success: false, error: err?.message || 'Erreur inconnue' };
     }
   }, [drivers]);
 
-  // ─── Assignation automatique ──────────────────────────────────────────────
+  // ─── Assignation automatique via le moteur ─────────────────────────────────
   const autoAssign = useCallback(async (requestId: string): Promise<{ success: boolean; error?: string }> => {
     setAutoAssigning(requestId);
     try {
       const engine = getDispatchEngine(db);
-      // Charger la demande depuis Firestore puis la traiter
-      const { getDoc, doc } = await import('firebase/firestore');
       const snap = await getDoc(doc(db, 'ride_requests', requestId));
       if (!snap.exists()) return { success: false, error: 'Demande introuvable' };
       const request = { id: snap.id, ...snap.data() } as any;
+      // Remettre en pending si nécessaire
+      if (request.status === 'offered') {
+        await updateDoc(doc(db, 'ride_requests', requestId), {
+          status: 'pending',
+          offeredToDriverId: null,
+          updatedAt: serverTimestamp(),
+        });
+        request.status = 'pending';
+      }
       await engine.processRequest(request);
       return { success: true };
     } catch (err: any) {
