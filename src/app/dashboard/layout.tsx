@@ -34,6 +34,7 @@ import {
   AlertTriangle,
   CheckCircle,
   Info,
+  Crown,
 } from 'lucide-react';
 import { signOut } from 'firebase/auth';
 import { useAuth } from '@/firebase/provider';
@@ -53,6 +54,7 @@ const navItems = [
   { href: '/dashboard/messages', label: 'Messagerie', icon: MessageSquare },
   { href: '/dashboard/sms', label: 'SMS', icon: MessageCircle },
   { href: '/dashboard/dispatch', label: 'Dispatch', icon: Radio },
+  { href: '/dashboard/users', label: 'Utilisateurs & Rôles', icon: Crown },
   { href: '/dashboard/settings', label: 'Paramètres', icon: Settings },
 ];
 

@@ -391,6 +391,24 @@ export default function DriverHomePage() {
               </div>
             </div>
 
+            {/* ── Bouton GPS — toujours visible quand course assignée ou en cours ── */}
+            {(activeRide.status === 'driver-assigned' || activeRide.status === 'in-progress') && (
+              <button
+                onClick={() => {
+                  if (activeRide.status === 'driver-assigned') setNavMode('to-pickup');
+                  else setNavMode('to-destination');
+                }}
+                className={`w-full py-3.5 rounded-full font-black text-base flex items-center justify-center gap-2 mb-3 transition-all ${
+                  navMode !== null
+                    ? 'bg-blue-600 text-white shadow-lg'
+                    : 'bg-blue-50 text-blue-700 border-2 border-blue-200'
+                }`}
+              >
+                <Navigation size={18} />
+                {navMode !== null ? 'GPS actif — Navigation en cours' : 'Naviguer'}
+              </button>
+            )}
+
             {activeRide.status === 'driver-assigned' && (
               <button onClick={handleArrivedAtPickup}
                 className="w-full py-4 rounded-full bg-black text-white font-black text-base shadow-lg flex items-center justify-center gap-2">
@@ -398,15 +416,28 @@ export default function DriverHomePage() {
               </button>
             )}
             {activeRide.status === 'driver-arrived' && (
-              <button onClick={handleStartRide}
-                className="w-full py-4 rounded-full bg-red-600 text-white font-black text-base shadow-lg flex items-center justify-center gap-2">
-                <Flag size={18} /> Démarrer la course
-              </button>
+              <div className="space-y-3">
+                <div className="bg-amber-50 border border-amber-100 rounded-2xl p-3 flex items-center gap-3">
+                  <span className="text-amber-600 text-lg">⏳</span>
+                  <p className="text-sm text-amber-800 font-medium">En attente du passager — il a été notifié</p>
+                </div>
+                <button onClick={handleStartRide}
+                  className="w-full py-4 rounded-full bg-red-600 text-white font-black text-base shadow-lg flex items-center justify-center gap-2">
+                  <Flag size={18} /> Démarrer la course
+                </button>
+              </div>
             )}
             {activeRide.status === 'in-progress' && (
               <button onClick={handleCompleteRide}
                 className="w-full py-4 rounded-full bg-green-600 text-white font-black text-base shadow-lg flex items-center justify-center gap-2">
                 <CheckCircle2 size={18} /> Terminer la course
+              </button>
+            )}
+
+            {/* Contact passager */}
+            {(activeRide.status === 'driver-assigned' || activeRide.status === 'driver-arrived') && (
+              <button className="w-full mt-3 py-3 rounded-full border border-gray-200 text-gray-600 font-semibold text-sm flex items-center justify-center gap-2">
+                <Phone size={15} /> Contacter le passager
               </button>
             )}
           </div>
