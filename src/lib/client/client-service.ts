@@ -122,6 +122,7 @@ export async function createRideRequest(request: Omit<RideRequest, 'createdAt' |
     ...request,
     status: 'pending',
     createdAt: serverTimestamp(),
+    requestedAt: serverTimestamp(), // Used by dispatch engine queries
   });
   return ref.id;
 }

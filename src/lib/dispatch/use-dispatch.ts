@@ -46,6 +46,17 @@ export function useDispatch(): UseDispatchReturn {
   const [isLoading, setIsLoading] = useState(false);
   const [autoAssigning, setAutoAssigning] = useState<string | null>(null);
 
+  // ─── Start the Dispatch Engine (auto-assign pending requests) ────────────
+  useEffect(() => {
+    const engine = getDispatchEngine(db);
+    engine.start();
+    console.log('[v0] Dispatch engine started from useDispatch');
+    return () => {
+      engine.stop();
+      console.log('[v0] Dispatch engine stopped');
+    };
+  }, []);
+
   // ─── Écouter les chauffeurs actifs ─────────────────────────────────────────
   useEffect(() => {
     const q = query(
@@ -64,7 +75,7 @@ export function useDispatch(): UseDispatchReturn {
   useEffect(() => {
     const q = query(
       collection(db, 'ride_requests'),
-      where('status', 'in', ['pending', 'searching']),
+      where('status', 'in', ['pending', 'searching', 'offered']),
       orderBy('requestedAt', 'asc'),
       limit(50)
     );
