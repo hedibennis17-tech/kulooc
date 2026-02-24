@@ -141,8 +141,8 @@ export function subscribeToLiveDrivers(
       callback(drivers);
     },
     (err) => {
-      console.warn('subscribeToLiveDrivers error:', err.message);
-      callback([]);
+	console.error('[v0] subscribeToLiveDrivers error:', err.message, err.code, err);
+	callback([]);
     }
   );
 }
@@ -185,10 +185,10 @@ export function subscribeToLiveRideRequests(
   db: Firestore,
   callback: (requests: LiveRideRequest[]) => void
 ): Unsubscribe {
+  // Use simple query without orderBy to avoid composite index requirement
   const q = query(
     collection(db, 'ride_requests'),
     where('status', 'in', ['pending', 'searching', 'offered']),
-    orderBy('requestedAt', 'asc'),
     limit(50)
   );
   return onSnapshot(
@@ -198,10 +198,16 @@ export function subscribeToLiveRideRequests(
         id: d.id,
         ...(d.data() as Omit<LiveRideRequest, 'id'>),
       }));
+      // Sort client-side by requestedAt
+      requests.sort((a, b) => {
+        const aTime = a.requestedAt?.toMillis?.() || 0;
+        const bTime = b.requestedAt?.toMillis?.() || 0;
+        return aTime - bTime;
+      });
       callback(requests);
     },
     (err) => {
-      console.warn('subscribeToLiveRideRequests error:', err.message);
+      console.error('[v0] subscribeToLiveRideRequests error:', err.message, err);
       callback([]);
     }
   );
@@ -245,24 +251,25 @@ export function subscribeToPassengerRide(
   passengerId: string,
   callback: (ride: LiveActiveRide | null) => void
 ): Unsubscribe {
+  // Simple single-field query to avoid needing composite index
   const q = query(
     collection(db, 'active_rides'),
     where('passengerId', '==', passengerId),
-    where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress']),
-    limit(1)
+    limit(5)
   );
   return onSnapshot(
     q,
     (snap) => {
-      if (!snap.empty) {
-        const d = snap.docs[0];
-        callback({ id: d.id, ...(d.data() as Omit<LiveActiveRide, 'id'>) });
+      const activeStatuses = ['driver-assigned', 'driver-arrived', 'in-progress'];
+      const activeDoc = snap.docs.find(d => activeStatuses.includes(d.data().status));
+      if (activeDoc) {
+        callback({ id: activeDoc.id, ...(activeDoc.data() as Omit<LiveActiveRide, 'id'>) });
       } else {
         callback(null);
       }
     },
     (err) => {
-      console.warn('subscribeToPassengerRide error:', err.message);
+      console.error('[v0] subscribeToPassengerRide error:', err.message, err.code, err);
       callback(null);
     }
   );

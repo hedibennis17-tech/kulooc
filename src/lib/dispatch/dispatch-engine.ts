@@ -116,6 +116,8 @@ export class DispatchEngine {
   }
 
   start() {
+    console.log('[v0] DispatchEngine.start() called');
+
     // Écouter les chauffeurs en ligne
     const driversQ = query(
       collection(this.db, 'drivers'),
@@ -123,6 +125,9 @@ export class DispatchEngine {
     );
     this.unsubDrivers = onSnapshot(driversQ, (snap) => {
       this.drivers = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DispatchDriver));
+      console.log('[v0] DispatchEngine: drivers updated, count:', this.drivers.length);
+    }, (err) => {
+      console.error('[v0] DispatchEngine drivers listener error:', err.message, err);
     });
 
     // Écouter les nouvelles demandes pending
@@ -133,15 +138,19 @@ export class DispatchEngine {
     this.unsubRequests = onSnapshot(requestsQ, (snap) => {
       const newRequests = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DispatchRequest));
       this.requests = newRequests;
+      console.log('[v0] DispatchEngine: pending requests updated, count:', newRequests.length);
       // Traiter chaque nouvelle demande
       snap.docChanges().forEach((change) => {
         if (change.type === 'added') {
           const req = { id: change.doc.id, ...change.doc.data() } as DispatchRequest;
+          console.log('[v0] DispatchEngine: new request detected:', req.id, 'processing:', this.processingIds.has(req.id));
           if (!this.processingIds.has(req.id)) {
-            setTimeout(() => this.processRequest(req), 500); // Petit délai pour laisser Firestore se stabiliser
+            setTimeout(() => this.processRequest(req), 500);
           }
         }
       });
+    }, (err) => {
+      console.error('[v0] DispatchEngine requests listener error:', err.message, err);
     });
   }
 
@@ -154,6 +163,7 @@ export class DispatchEngine {
   }
 
   public async processRequest(request: DispatchRequest) {
+    console.log('[v0] DispatchEngine.processRequest:', request.id, 'drivers available:', this.drivers.length);
     if (this.processingIds.has(request.id)) return;
     this.processingIds.add(request.id);
 

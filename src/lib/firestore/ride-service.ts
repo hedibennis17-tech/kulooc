@@ -161,20 +161,24 @@ export function subscribeToPassengerActiveRide(
   passengerId: string,
   callback: (ride: ActiveRide | null) => void
 ): Unsubscribe {
+  // Simple single-field query to avoid needing composite index
   const q = query(
     collection(db, 'active_rides'),
     where('passengerId', '==', passengerId),
-    where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress']),
-    limit(1)
+    limit(5)
   );
 
   return onSnapshot(q, (snap) => {
-    if (!snap.empty) {
-      const doc = snap.docs[0];
-      callback({ id: doc.id, ...doc.data() } as ActiveRide);
+    const activeStatuses = ['driver-assigned', 'driver-arrived', 'in-progress'];
+    const activeDoc = snap.docs.find(d => activeStatuses.includes(d.data().status));
+    if (activeDoc) {
+      callback({ id: activeDoc.id, ...activeDoc.data() } as ActiveRide);
     } else {
       callback(null);
     }
+  }, (err) => {
+    console.error('[v0] subscribeToPassengerActiveRide error:', err.message, err);
+    callback(null);
   });
 }
 
@@ -202,20 +206,25 @@ export function subscribeToDriverActiveRide(
   driverId: string,
   callback: (ride: ActiveRide | null) => void
 ): Unsubscribe {
+  // Simple single-field query to avoid needing composite index
   const q = query(
     collection(db, 'active_rides'),
     where('driverId', '==', driverId),
-    where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress']),
-    limit(1)
+    limit(5)
   );
 
   return onSnapshot(q, (snap) => {
-    if (!snap.empty) {
-      const d = snap.docs[0];
-      callback({ id: d.id, ...d.data() } as ActiveRide);
+    // Filter active statuses client-side
+    const activeStatuses = ['driver-assigned', 'driver-arrived', 'in-progress'];
+    const activeDoc = snap.docs.find(d => activeStatuses.includes(d.data().status));
+    if (activeDoc) {
+      callback({ id: activeDoc.id, ...activeDoc.data() } as ActiveRide);
     } else {
       callback(null);
     }
+  }, (err) => {
+    console.error('[v0] subscribeToDriverActiveRide error:', err.message, err);
+    callback(null);
   });
 }
 

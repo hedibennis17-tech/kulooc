@@ -76,13 +76,18 @@ export function useDispatch(): UseDispatchReturn {
     const q = query(
       collection(db, 'ride_requests'),
       where('status', 'in', ['pending', 'searching', 'offered']),
-      orderBy('requestedAt', 'asc'),
       limit(50)
     );
     const unsub = onSnapshot(q, (snap) => {
-      setRideRequests(snap.docs.map((d) => ({ id: d.id, ...d.data() } as RideRequest)));
+      const requests = snap.docs.map((d) => ({ id: d.id, ...d.data() } as RideRequest));
+      requests.sort((a: any, b: any) => {
+        const aTime = a.requestedAt?.toMillis?.() || a.createdAt?.toMillis?.() || 0;
+        const bTime = b.requestedAt?.toMillis?.() || b.createdAt?.toMillis?.() || 0;
+        return aTime - bTime;
+      });
+      setRideRequests(requests);
     }, (err) => {
-      console.warn('useDispatch requests:', err.message);
+      console.error('[v0] useDispatch requests error:', err.message, err);
     });
     return () => unsub();
   }, []);

@@ -375,6 +375,7 @@ export default function ClientHomePage() {
         estimatedDistanceKm: est.distance,
         surgeMultiplier: 1.0,
       });
+      console.log('[v0] Ride request created:', requestId, 'liveDrivers count:', liveDrivers.length);
       setCurrentRequestId(requestId);
       setStep('waiting');
       toast({ title: 'Course demandee !', description: 'Recherche d\'un chauffeur en cours...' });
@@ -390,25 +391,38 @@ export default function ClientHomePage() {
   };
 
   const tryAutoAssign = async (requestId: string, est: { price: number; distance: number; duration: number }) => {
-    if (!db || !pickupCoords || !destCoords) return;
-    // Wait a few seconds for the dispatch engine (if running on admin) to pick it up
-    await new Promise(r => setTimeout(r, 5000));
+    console.log('[v0] tryAutoAssign called', { requestId, db: !!db, pickupCoords, destCoords });
+    if (!db || !pickupCoords || !destCoords) {
+      console.log('[v0] tryAutoAssign aborted: missing db or coords');
+      return;
+    }
+
+    // Wait 3 seconds for the dispatch engine to pick it up
+    await new Promise(r => setTimeout(r, 3000));
 
     // Check if already assigned by dispatch engine
+    let currentStatus = 'unknown';
     try {
-      const reqSnap = await new Promise<any>((resolve) => {
-        const unsub = onSnapshot(doc(db, 'ride_requests', requestId), (snap) => {
-          unsub();
-          resolve(snap);
-        });
-      });
-      if (!reqSnap.exists() || reqSnap.data().status !== 'pending') {
-        console.log('[v0] Request already handled by dispatch engine, status:', reqSnap.data()?.status);
-        return; // Already handled
+      const { getDoc } = await import('firebase/firestore');
+      const reqSnap = await getDoc(doc(db, 'ride_requests', requestId));
+      if (!reqSnap.exists()) {
+        console.log('[v0] Request doc does not exist');
+        return;
       }
-    } catch { return; }
+      currentStatus = reqSnap.data().status;
+      console.log('[v0] Current request status:', currentStatus);
+      if (currentStatus !== 'pending') {
+        console.log('[v0] Request already handled, status:', currentStatus);
+        return;
+      }
+    } catch (err) {
+      console.log('[v0] Error checking request status:', err);
+      return;
+    }
 
     // Find best driver from live drivers
+    console.log('[v0] Live drivers available:', liveDrivers.length, liveDrivers.map(d => ({ id: d.id, name: d.name, status: d.status, hasLocation: !!d.location })));
+    
     const request = {
       id: requestId,
       passengerId: user!.uid,
@@ -420,36 +434,67 @@ export default function ClientHomePage() {
       estimatedDistanceKm: est.distance,
       estimatedDurationMin: est.duration,
       surgeMultiplier: 1.0,
-      status: 'pending',
+      status: 'pending' as const,
     };
 
     const bestDriver = findBestDriver(request, liveDrivers);
     if (!bestDriver) {
-      console.log('[v0] No nearby driver found for auto-assign');
+      console.log('[v0] No nearby driver found for auto-assign. Online drivers:', liveDrivers.filter(d => d.status === 'online').length);
+      // Fallback: just pick any online driver regardless of distance
+      const anyOnline = liveDrivers.find(d => d.status === 'online');
+      if (!anyOnline) {
+        console.log('[v0] No online driver at all');
+        return;
+      }
+      console.log('[v0] Fallback: using any online driver:', anyOnline.name, anyOnline.id);
+      await doAssignDriver(db, requestId, anyOnline, request, est);
       return;
     }
 
-    console.log('[v0] Auto-assigning to driver:', bestDriver.name);
+    console.log('[v0] Best driver found:', bestDriver.name, bestDriver.id);
+    await doAssignDriver(db, requestId, bestDriver, request, est);
+  };
+
+  const doAssignDriver = async (
+    dbRef: any, 
+    requestId: string, 
+    driver: LiveDriver, 
+    request: any, 
+    est: { price: number; distance: number; duration: number }
+  ) => {
     const fare = calculateFare(est.distance, est.duration, 1.0, request.serviceType);
+    console.log('[v0] Fare calculated:', fare);
 
     try {
-      await runTransaction(db, async (tx) => {
-        const reqRef = doc(db, 'ride_requests', requestId);
-        const driverRef = doc(db, 'drivers', bestDriver.id);
-        const [reqSnap, drvSnap] = await Promise.all([tx.get(reqRef), tx.get(driverRef)]);
+      await runTransaction(dbRef, async (tx: any) => {
+        const reqRef = doc(dbRef, 'ride_requests', requestId);
+        const driverRef = doc(dbRef, 'drivers', driver.id);
+        const reqSnap = await tx.get(reqRef);
+        const drvSnap = await tx.get(driverRef);
 
-        if (!reqSnap.exists() || reqSnap.data().status !== 'pending') return;
-        if (!drvSnap.exists() || drvSnap.data().status !== 'online') return;
+        console.log('[v0] TX - request exists:', reqSnap.exists(), 'status:', reqSnap.data()?.status);
+        console.log('[v0] TX - driver exists:', drvSnap.exists(), 'status:', drvSnap.data()?.status);
 
-        const rideRef = doc(collection(db, 'active_rides'));
+        if (!reqSnap.exists() || reqSnap.data().status !== 'pending') {
+          console.log('[v0] TX aborted: request not pending');
+          return;
+        }
+        if (!drvSnap.exists() || !['online', 'available'].includes(drvSnap.data().status)) {
+          console.log('[v0] TX aborted: driver not online, status:', drvSnap.data()?.status);
+          return;
+        }
+
+        const rideRef = doc(collection(dbRef, 'active_rides'));
+        console.log('[v0] Creating active_ride:', rideRef.id);
+
         tx.set(rideRef, {
           requestId,
           passengerId: user!.uid,
           passengerName: user!.displayName || user!.email?.split('@')[0] || 'Passager',
           passengerPhone: user!.phoneNumber || '',
-          driverId: bestDriver.id,
-          driverName: bestDriver.name,
-          driverLocation: bestDriver.location || null,
+          driverId: driver.id,
+          driverName: driver.name,
+          driverLocation: driver.location || null,
           pickup: request.pickup,
           destination: request.destination,
           serviceType: request.serviceType,
@@ -461,12 +506,15 @@ export default function ClientHomePage() {
           pricing: fare,
           assignedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
+          rideStartedAt: null,
+          rideCompletedAt: null,
+          finalPrice: null,
         });
 
         tx.update(reqRef, {
           status: 'driver-assigned',
-          driverId: bestDriver.id,
-          driverName: bestDriver.name,
+          driverId: driver.id,
+          driverName: driver.name,
           assignedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
         });
@@ -477,9 +525,10 @@ export default function ClientHomePage() {
           updatedAt: serverTimestamp(),
         });
       });
-      console.log('[v0] Auto-assign successful');
-    } catch (err) {
-      console.log('[v0] Auto-assign transaction failed:', err);
+      console.log('[v0] Auto-assign transaction SUCCESS');
+      toast({ title: 'Chauffeur assigne !', description: `${driver.name} est en route vers vous.` });
+    } catch (err: any) {
+      console.log('[v0] Auto-assign transaction FAILED:', err?.message || err, err?.code);
     }
   };
 
