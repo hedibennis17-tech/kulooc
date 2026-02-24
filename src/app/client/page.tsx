@@ -1,75 +1,61 @@
 'use client';
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useUser } from '@/firebase/provider';
 import { useFirestore } from '@/firebase/provider';
-import { createRideRequest, watchActiveRide, cancelRideRequest } from '@/lib/client/client-service';
+import { createRideRequest, cancelRideRequest } from '@/lib/client/client-service';
 import { subscribeToLiveDrivers, subscribeToPassengerRide, updateClientPresence, type LiveDriver, type LiveActiveRide } from '@/lib/realtime/realtime-service';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Badge } from '@/components/ui/badge';
 import {
   MapPin, Navigation, Car, Clock, DollarSign,
   Star, ChevronRight, X, Loader2, CheckCircle,
-  Shield, Leaf, Phone, User, AlertCircle
+  Shield, Phone, User, AlertCircle
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
+import { autocompleteAddress, reverseGeocode, type AutocompletePrediction } from '@/app/actions/places';
+import { useGeolocation } from '@/lib/hooks/use-geolocation';
+import { calculateFare } from '@/lib/services/fare-service';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
+// ─── Tarifs KULOOC ────────────────────────────────────────────────────────────
 
 const SERVICE_TYPES = [
   {
-    id: 'kulooc_x',
+    id: 'KULOOC X',
     name: 'KULOOC X',
-    description: 'Économique',
+    description: 'Berline standard · 4 passagers',
     icon: <Car className="w-5 h-5" />,
-    multiplier: 1.0,
     eta: '3-5 min',
     color: 'bg-gray-900',
   },
   {
-    id: 'kulooc_comfort',
-    name: 'Confort',
-    description: "Plus d'espace",
-    icon: <Star className="w-5 h-5" />,
-    multiplier: 1.4,
-    eta: '5-8 min',
-    color: 'bg-blue-900',
-  },
-  {
-    id: 'kulooc_xl',
-    name: 'XL',
-    description: "Jusqu'à 6 passagers",
+    id: 'KULOOC XL',
+    name: 'KULOOC XL',
+    description: 'SUV/Minivan · 6 passagers',
     icon: <Shield className="w-5 h-5" />,
-    multiplier: 1.8,
     eta: '6-10 min',
     color: 'bg-purple-900',
   },
   {
-    id: 'kulooc_green',
-    name: 'Green',
-    description: 'Véhicule électrique',
-    icon: <Leaf className="w-5 h-5" />,
-    multiplier: 1.2,
-    eta: '4-7 min',
-    color: 'bg-green-900',
+    id: 'KULOOC CONFORT',
+    name: 'KULOOC CONFORT',
+    description: 'Berline premium · confort',
+    icon: <Star className="w-5 h-5" />,
+    eta: '5-8 min',
+    color: 'bg-blue-900',
   },
 ];
 
-const BASE_PRICE = 4.50;
-const PRICE_PER_KM = 1.85;
 const MONTREAL_CENTER = { lat: 45.5019, lng: -73.5674 };
 
-function estimatePrice(serviceMultiplier: number) {
-  const distance = 5 + Math.random() * 7;
-  const duration = Math.round(distance * 3 + Math.random() * 5);
-  const price = (BASE_PRICE + distance * PRICE_PER_KM) * serviceMultiplier * 1.14975;
-  return { price, distance: Math.round(distance * 10) / 10, duration };
+function estimatePrice(serviceId: string, distanceKm = 8, durationMin = 20) {
+  const fare = calculateFare(distanceKm, durationMin, 1.0, serviceId);
+  return { price: fare.total, distance: distanceKm, duration: durationMin, fare };
 }
 
-// ─── Icône voiture SVG pour les marqueurs chauffeurs ─────────────────────────
+// ─── Marqueur voiture ─────────────────────────────────────────────────────────
 
 function CarMarker({ status, vehicleType }: { status: string; vehicleType?: string }) {
   const colors: Record<string, string> = {
@@ -80,25 +66,16 @@ function CarMarker({ status, vehicleType }: { status: string; vehicleType?: stri
   };
   const color = colors[status] || '#22c55e';
   const isTruck = vehicleType === 'truck' || vehicleType === 'van';
-
   return (
-    <div
-      className="relative flex items-center justify-center"
-      style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }}
-    >
-      <div
-        className="absolute inset-0 rounded-full animate-pulse"
-        style={{ backgroundColor: color + '40', width: 32, height: 32, margin: -6 }}
-      />
+    <div className="relative flex items-center justify-center" style={{ filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.3))' }}>
+      <div className="absolute inset-0 rounded-full animate-pulse" style={{ backgroundColor: color + '40', width: 32, height: 32, margin: -6 }} />
       {isTruck ? (
         <svg width="26" height="20" viewBox="0 0 26 20" fill="none">
           <rect x="1" y="5" width="16" height="10" rx="2" fill={color} />
           <rect x="17" y="7" width="7" height="8" rx="1" fill={color} />
-          <rect x="22" y="9" width="3" height="4" rx="0.5" fill={color} opacity="0.7" />
           <circle cx="5" cy="17" r="2.5" fill="#1f2937" stroke="white" strokeWidth="1" />
           <circle cx="13" cy="17" r="2.5" fill="#1f2937" stroke="white" strokeWidth="1" />
           <circle cx="21" cy="17" r="2.5" fill="#1f2937" stroke="white" strokeWidth="1" />
-          <rect x="3" y="7" width="5" height="4" rx="0.5" fill="white" opacity="0.6" />
         </svg>
       ) : (
         <svg width="24" height="18" viewBox="0 0 24 18" fill="none">
@@ -106,106 +83,105 @@ function CarMarker({ status, vehicleType }: { status: string; vehicleType?: stri
           <path d="M7 4 L8 8 L16 8 L17 4 Z" fill="white" opacity="0.5" />
           <circle cx="6" cy="15" r="2.5" fill="#1f2937" stroke="white" strokeWidth="1" />
           <circle cx="18" cy="15" r="2.5" fill="#1f2937" stroke="white" strokeWidth="1" />
-          <rect x="2" y="10" width="3" height="2" rx="0.5" fill="#fbbf24" />
-          <rect x="19" y="10" width="3" height="2" rx="0.5" fill="#fbbf24" />
         </svg>
       )}
     </div>
   );
 }
 
-// ─── Carte Google Maps avec chauffeurs temps réel ────────────────────────────
+// ─── Carte Google Maps ────────────────────────────────────────────────────────
 
-function ClientMapView({
-  apiKey,
-  drivers,
-  userPos,
-  pickupPos,
-  destPos,
-  activeRide,
-}: {
+function ClientMapView({ apiKey, drivers, userPos, activeRide }: {
   apiKey: string;
   drivers: LiveDriver[];
   userPos: { lat: number; lng: number };
-  pickupPos?: { lat: number; lng: number } | null;
-  destPos?: { lat: number; lng: number } | null;
   activeRide?: LiveActiveRide | null;
 }) {
   return (
-    <APIProvider apiKey={apiKey} libraries={['geometry']}>
-      <div className="w-full h-full">
-        <Map
-          defaultCenter={MONTREAL_CENTER}
-          center={userPos}
-          defaultZoom={13}
-          mapId="a22506a8155b4369"
-          disableDefaultUI={true}
-          zoomControl={true}
-          gestureHandling="greedy"
-          className="w-full h-full"
-        >
-          {/* Position du passager */}
-          <AdvancedMarker position={userPos} title="Votre position">
-            <div className="relative flex items-center justify-center">
-              <div className="absolute w-10 h-10 rounded-full bg-red-500/25 animate-ping" />
-              <div className="w-5 h-5 rounded-full bg-red-600 border-2 border-white shadow-lg" />
+    <APIProvider apiKey={apiKey}>
+      <Map
+        defaultCenter={MONTREAL_CENTER}
+        center={userPos}
+        defaultZoom={14}
+        mapId="a22506a8155b4369"
+        disableDefaultUI={true}
+        zoomControl={true}
+        gestureHandling="greedy"
+        className="w-full h-full"
+      >
+        <AdvancedMarker position={userPos} title="Votre position">
+          <div className="relative flex items-center justify-center">
+            <div className="absolute w-10 h-10 rounded-full bg-red-500/25 animate-ping" />
+            <div className="w-5 h-5 rounded-full bg-red-600 border-2 border-white shadow-lg" />
+          </div>
+        </AdvancedMarker>
+        {drivers.map((d) => {
+          if (!d.location) return null;
+          return (
+            <AdvancedMarker key={d.id} position={{ lat: d.location.latitude, lng: d.location.longitude }}>
+              <CarMarker status={d.status} vehicleType={d.vehicle?.type} />
+            </AdvancedMarker>
+          );
+        })}
+        {activeRide?.driverLocation && (
+          <AdvancedMarker position={{ lat: activeRide.driverLocation.latitude, lng: activeRide.driverLocation.longitude }}>
+            <div className="relative">
+              <div className="absolute inset-0 rounded-full bg-amber-400/40 animate-ping w-10 h-10 -m-2" />
+              <CarMarker status="en-route" />
             </div>
           </AdvancedMarker>
-
-          {/* Marqueur de prise en charge */}
-          {pickupPos && (
-            <AdvancedMarker position={pickupPos} title="Prise en charge">
-              <div className="w-6 h-6 rounded-full bg-green-500 border-2 border-white shadow-md flex items-center justify-center">
-                <MapPin className="w-3 h-3 text-white" />
-              </div>
-            </AdvancedMarker>
-          )}
-
-          {/* Marqueur de destination */}
-          {destPos && (
-            <AdvancedMarker position={destPos} title="Destination">
-              <div className="w-6 h-6 rounded-sm bg-red-600 border-2 border-white shadow-md flex items-center justify-center">
-                <MapPin className="w-3 h-3 text-white" />
-              </div>
-            </AdvancedMarker>
-          )}
-
-          {/* Chauffeurs en temps réel */}
-          {drivers.map((driver) => {
-            if (!driver.location) return null;
-            const pos = { lat: driver.location.latitude, lng: driver.location.longitude };
-            return (
-              <AdvancedMarker
-                key={driver.id}
-                position={pos}
-                title={`${driver.name} — ${driver.status}`}
-              >
-                <CarMarker
-                  status={driver.status}
-                  vehicleType={driver.vehicle?.type}
-                />
-              </AdvancedMarker>
-            );
-          })}
-
-          {/* Position du chauffeur assigné (course active) */}
-          {activeRide?.driverLocation && (
-            <AdvancedMarker
-              position={{
-                lat: activeRide.driverLocation.latitude,
-                lng: activeRide.driverLocation.longitude,
-              }}
-              title={`${activeRide.driverName} — En route`}
-            >
-              <div className="relative">
-                <div className="absolute inset-0 rounded-full bg-amber-400/40 animate-ping w-10 h-10 -m-2" />
-                <CarMarker status="en-route" />
-              </div>
-            </AdvancedMarker>
-          )}
-        </Map>
-      </div>
+        )}
+      </Map>
     </APIProvider>
+  );
+}
+
+// ─── Champ avec autocomplete ──────────────────────────────────────────────────
+
+function AddressInput({
+  value, onChange, placeholder, icon, suggestions, isSearching, onFocus, onBlur, onSelect,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  placeholder: string;
+  icon: React.ReactNode;
+  suggestions: AutocompletePrediction[];
+  isSearching: boolean;
+  onFocus: () => void;
+  onBlur: () => void;
+  onSelect: (s: AutocompletePrediction) => void;
+}) {
+  return (
+    <div className="relative">
+      <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">{icon}</div>
+      <Input
+        placeholder={placeholder}
+        value={value}
+        onChange={e => onChange(e.target.value)}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        autoComplete="off"
+        className="pl-9 h-12 border-gray-200 bg-gray-50 text-sm pr-8"
+      />
+      {isSearching && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />}
+      {suggestions.length > 0 && (
+        <div className="absolute top-full mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg z-50 max-h-56 overflow-y-auto">
+          {suggestions.map(s => (
+            <button
+              key={s.place_id}
+              onMouseDown={() => onSelect(s)}
+              className="w-full flex items-start gap-3 px-4 py-3 hover:bg-gray-50 text-left transition-colors"
+            >
+              <MapPin className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-gray-900">{s.structured_formatting.main_text}</p>
+                <p className="text-xs text-gray-400">{s.structured_formatting.secondary_text}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -215,10 +191,22 @@ export default function ClientHomePage() {
   const { user } = useUser();
   const db = useFirestore();
   const { toast } = useToast();
+  const geolocation = useGeolocation();
 
+  // Adresses
   const [pickup, setPickup] = useState('');
+  const [pickupPos, setPickupPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [pickupSuggestions, setPickupSuggestions] = useState<AutocompletePrediction[]>([]);
+  const [isPickupActive, setIsPickupActive] = useState(false);
+  const [isSearchingPickup, setIsSearchingPickup] = useState(false);
+
   const [destination, setDestination] = useState('');
-  const [selectedService, setSelectedService] = useState('kulooc_x');
+  const [destPos, setDestPos] = useState<{ lat: number; lng: number } | null>(null);
+  const [destSuggestions, setDestSuggestions] = useState<AutocompletePrediction[]>([]);
+  const [isDestActive, setIsDestActive] = useState(false);
+  const [isSearchingDest, setIsSearchingDest] = useState(false);
+
+  const [selectedService, setSelectedService] = useState('KULOOC X');
   const [step, setStep] = useState<'search' | 'select' | 'waiting' | 'active'>('search');
   const [activeRide, setActiveRide] = useState<LiveActiveRide | null>(null);
   const [currentRequestId, setCurrentRequestId] = useState<string | null>(null);
@@ -229,60 +217,74 @@ export default function ClientHomePage() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const selectedServiceData = SERVICE_TYPES.find(s => s.id === selectedService)!;
 
-  // ─── Géolocalisation ────────────────────────────────────────────────────────
+  // ─── Géolocalisation → adresse réelle ──────────────────────────────────────
   useEffect(() => {
-    if (navigator.geolocation) {
-      navigator.geolocation.getCurrentPosition(
-        (pos) => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => {} // Fallback silencieux sur Montréal
-      );
+    if (geolocation.latitude && geolocation.longitude) {
+      const lat = geolocation.latitude;
+      const lng = geolocation.longitude;
+      setUserPos({ lat, lng });
+      setPickupPos({ lat, lng });
+      if (!pickup) {
+        reverseGeocode(lat, lng).then(res => {
+          if (res.success && res.address) setPickup(res.address);
+        });
+      }
     }
-  }, []);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geolocation.latitude, geolocation.longitude]);
+
+  // ─── Autocomplete pickup ────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!isPickupActive || pickup.length < 3) { setPickupSuggestions([]); return; }
+    const t = setTimeout(async () => {
+      setIsSearchingPickup(true);
+      const res = await autocompleteAddress(pickup);
+      if (res.success) setPickupSuggestions(res.predictions);
+      setIsSearchingPickup(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [pickup, isPickupActive]);
+
+  // ─── Autocomplete destination ───────────────────────────────────────────────
+  useEffect(() => {
+    if (!isDestActive || destination.length < 3) { setDestSuggestions([]); return; }
+    const t = setTimeout(async () => {
+      setIsSearchingDest(true);
+      const res = await autocompleteAddress(destination);
+      if (res.success) setDestSuggestions(res.predictions);
+      setIsSearchingDest(false);
+    }, 300);
+    return () => clearTimeout(t);
+  }, [destination, isDestActive]);
 
   // ─── Présence client ────────────────────────────────────────────────────────
   useEffect(() => {
-    if (user && db) {
-      updateClientPresence(db, user.uid).catch(() => {});
-    }
+    if (user && db) updateClientPresence(db, user.uid).catch(() => {});
   }, [user, db]);
 
-  // ─── Chauffeurs en temps réel ────────────────────────────────────────────────
+  // ─── Chauffeurs en temps réel ───────────────────────────────────────────────
   useEffect(() => {
     if (!db) return;
-    const unsub = subscribeToLiveDrivers(db, (drivers) => {
-      setLiveDrivers(drivers);
-    });
+    const unsub = subscribeToLiveDrivers(db, setLiveDrivers);
     return () => unsub();
   }, [db]);
 
-   // ─── Course active du passager ───────────────────────────────────────────
+  // ─── Course active ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!user || !db) return;
     const unsub = subscribeToPassengerRide(db, user.uid, (ride) => {
-      const prevStatus = activeRide?.status;
+      const prev = activeRide?.status;
       setActiveRide(ride);
       if (ride) {
-        // Passer à l'étape active dès qu'un chauffeur est assigné
-        if (
-          ride.status === 'driver-assigned' ||
-          ride.status === 'driver-arrived' ||
-          ride.status === 'in-progress'
-        ) {
-          setStep('active');
-        }
-        // Notifier le passager quand le chauffeur arrive
-        if (ride.status === 'driver-arrived' && prevStatus !== 'driver-arrived') {
+        if (['driver-assigned', 'driver-arrived', 'in-progress'].includes(ride.status)) setStep('active');
+        if (ride.status === 'driver-arrived' && prev !== 'driver-arrived')
           toast({ title: '📍 Votre chauffeur est arrivé !', description: 'Votre taxi KULOOC est devant vous.' });
-        }
-        // Course démarrée
-        if (ride.status === 'in-progress' && prevStatus !== 'in-progress') {
+        if (ride.status === 'in-progress' && prev !== 'in-progress')
           toast({ title: '🏁 Course démarrée !', description: 'Bon voyage !' });
-        }
-        // Course terminée
         if (ride.status === 'completed') {
           setStep('search');
           setCurrentRequestId(null);
-          toast({ title: '✅ Course terminée !', description: `Merci d'avoir choisi KULOOC 🍁` });
+          toast({ title: '✅ Course terminée !', description: "Merci d'avoir choisi KULOOC 🍁" });
         }
       }
       if (!ride && step === 'active') setStep('search');
@@ -291,6 +293,7 @@ export default function ClientHomePage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, db]);
 
+  // ─── Handlers ──────────────────────────────────────────────────────────────
   const handleSearch = () => {
     if (!pickup.trim() || !destination.trim()) {
       toast({ title: 'Adresses requises', description: 'Entrez un départ et une destination.', variant: 'destructive' });
@@ -303,20 +306,20 @@ export default function ClientHomePage() {
     if (!user) return;
     setIsLoading(true);
     try {
-      const est = estimatePrice(selectedServiceData.multiplier);
+      const est = estimatePrice(selectedService);
       const requestId = await createRideRequest({
         passengerId: user.uid,
         passengerName: user.displayName || user.email?.split('@')[0] || 'Passager',
         passengerPhone: user.phoneNumber || '',
         pickup: {
           address: pickup,
-          latitude: userPos.lat,
-          longitude: userPos.lng,
+          latitude: pickupPos?.lat ?? userPos.lat,
+          longitude: pickupPos?.lng ?? userPos.lng,
         },
         destination: {
           address: destination,
-          latitude: MONTREAL_CENTER.lat + (Math.random() - 0.5) * 0.05,
-          longitude: MONTREAL_CENTER.lng + (Math.random() - 0.5) * 0.05,
+          latitude: destPos?.lat ?? MONTREAL_CENTER.lat,
+          longitude: destPos?.lng ?? MONTREAL_CENTER.lng,
         },
         serviceType: selectedService,
         estimatedPrice: Math.round(est.price * 100) / 100,
@@ -326,8 +329,8 @@ export default function ClientHomePage() {
       });
       setCurrentRequestId(requestId);
       setStep('waiting');
-      toast({ title: '🚗 Course demandée !', description: 'Recherche d\'un chauffeur en cours...' });
-    } catch (err) {
+      toast({ title: '🚗 Course demandée !', description: "Recherche d'un chauffeur en cours..." });
+    } catch {
       toast({ title: 'Erreur', description: 'Impossible de créer la course.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
@@ -342,82 +345,86 @@ export default function ClientHomePage() {
     setDestination('');
   };
 
-  const est = estimatePrice(selectedServiceData.multiplier);
-  const nearbyDrivers = liveDrivers.filter((d) => d.status === 'online').length;
+  const est = estimatePrice(selectedService);
+  const nearbyDrivers = liveDrivers.filter(d => d.status === 'online').length;
 
   return (
     <div className="flex flex-col h-full">
-      {/* ── Carte Google Maps ── */}
-      <div className="relative h-52 bg-gray-100 overflow-hidden">
+      {/* ── Carte ── */}
+      <div className="relative h-52 bg-gray-100 overflow-hidden flex-shrink-0">
         {apiKey ? (
-          <ClientMapView
-            apiKey={apiKey}
-            drivers={liveDrivers}
-            userPos={userPos}
-            activeRide={activeRide}
-          />
+          <ClientMapView apiKey={apiKey} drivers={liveDrivers} userPos={userPos} activeRide={activeRide} />
         ) : (
           <div className="flex items-center justify-center h-full bg-gray-100">
-            <div className="text-center">
-              <MapPin className="w-8 h-8 text-red-600 mx-auto mb-2" />
-              <p className="text-gray-500 text-sm">Montréal, QC</p>
-            </div>
+            <MapPin className="w-8 h-8 text-red-600" />
           </div>
         )}
-
-        {/* Badge chauffeurs disponibles */}
         {nearbyDrivers > 0 && step === 'search' && (
           <div className="absolute top-3 left-3 bg-white/90 backdrop-blur-sm rounded-full px-3 py-1 shadow text-xs font-medium text-green-700 flex items-center gap-1.5">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             {nearbyDrivers} chauffeur{nearbyDrivers > 1 ? 's' : ''} disponible{nearbyDrivers > 1 ? 's' : ''}
           </div>
         )}
-
         <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none" />
       </div>
 
-      {/* ── Contenu principal ── */}
-      <div className="flex-1 bg-white px-4 pt-3 pb-2 overflow-y-auto">
+      {/* ── Contenu ── */}
+      <div className="flex-1 bg-white px-4 pt-3 pb-4 overflow-y-auto">
 
         {/* ── ÉTAPE 1 : Recherche ── */}
         {step === 'search' && (
           <div className="space-y-3">
             <h2 className="text-xl font-bold text-gray-900">Où allez-vous ?</h2>
 
-            <div className="relative">
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 bg-black rounded-full" />
-              <Input
-                placeholder="Votre position actuelle"
-                value={pickup}
-                onChange={e => setPickup(e.target.value)}
-                className="pl-8 h-12 border-gray-200 bg-gray-50 text-sm"
-              />
-            </div>
+            <AddressInput
+              value={pickup}
+              onChange={setPickup}
+              placeholder="Votre position actuelle"
+              icon={<div className="w-3 h-3 bg-black rounded-full" />}
+              suggestions={pickupSuggestions}
+              isSearching={isSearchingPickup}
+              onFocus={() => setIsPickupActive(true)}
+              onBlur={() => setTimeout(() => { setIsPickupActive(false); setPickupSuggestions([]); }, 200)}
+              onSelect={s => {
+                setPickup(s.description);
+                setPickupSuggestions([]);
+              }}
+            />
 
-            <div className="relative">
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 bg-red-600 rounded-sm" />
-              <Input
-                placeholder="Entrez votre destination"
-                value={destination}
-                onChange={e => setDestination(e.target.value)}
-                className="pl-8 h-12 border-gray-200 bg-gray-50 text-sm"
-                onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              />
-            </div>
+            <AddressInput
+              value={destination}
+              onChange={setDestination}
+              placeholder="Entrez votre destination"
+              icon={<div className="w-3 h-3 bg-red-600 rounded-sm" />}
+              suggestions={destSuggestions}
+              isSearching={isSearchingDest}
+              onFocus={() => setIsDestActive(true)}
+              onBlur={() => setTimeout(() => { setIsDestActive(false); setDestSuggestions([]); }, 200)}
+              onSelect={s => {
+                setDestination(s.description);
+                setDestSuggestions([]);
+              }}
+            />
 
+            {/* Destinations rapides */}
             <div className="space-y-1">
-              {['Aéroport YUL — Dorval, QC', 'Gare Centrale — Montréal, QC', 'Vieux-Montréal, QC', 'Université McGill — Montréal, QC'].map(place => (
+              {[
+                { label: 'Aéroport YUL', sub: 'Dorval, QC' },
+                { label: 'Gare Centrale', sub: 'Montréal, QC' },
+                { label: 'Vieux-Montréal', sub: 'Montréal, QC' },
+                { label: 'Université McGill', sub: 'Montréal, QC' },
+              ].map(place => (
                 <button
-                  key={place}
-                  onClick={() => setDestination(place)}
+                  key={place.label}
+                  onClick={() => setDestination(`${place.label}, ${place.sub}`)}
                   className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-left transition-colors"
                 >
                   <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
                     <MapPin className="w-4 h-4 text-gray-500" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{place.split(' — ')[0]}</p>
-                    <p className="text-xs text-gray-400">{place.split(' — ')[1] || 'Montréal, QC'}</p>
+                    <p className="text-sm font-medium text-gray-900">{place.label}</p>
+                    <p className="text-xs text-gray-400">{place.sub}</p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-gray-300 ml-auto" />
                 </button>
@@ -447,12 +454,10 @@ export default function ClientHomePage() {
                 <p className="text-sm font-semibold text-gray-900 truncate">{destination}</p>
               </div>
             </div>
-
             <h3 className="font-bold text-gray-900">Choisir un service</h3>
-
             <div className="space-y-2">
               {SERVICE_TYPES.map(service => {
-                const e = estimatePrice(service.multiplier);
+                const e = estimatePrice(service.id);
                 const isSelected = selectedService === service.id;
                 return (
                   <button
@@ -472,52 +477,45 @@ export default function ClientHomePage() {
                     </div>
                     <div className="text-right">
                       <p className="font-bold text-gray-900">${e.price.toFixed(2)}</p>
-                      <p className="text-xs text-gray-400">{e.distance} km</p>
+                      <p className="text-xs text-gray-400">~{e.distance} km</p>
                     </div>
                     {isSelected && <CheckCircle className="w-5 h-5 text-black flex-shrink-0" />}
                   </button>
                 );
               })}
             </div>
-
             <div className="bg-gray-50 rounded-xl p-3 flex items-center justify-between">
               <div className="flex items-center gap-2 text-sm text-gray-600">
                 <DollarSign className="w-4 h-4" />
-                <span>Estimation TTC</span>
+                <span>Estimation TTC (taxes incluses)</span>
               </div>
               <span className="font-bold text-gray-900">${est.price.toFixed(2)}</span>
             </div>
-
             <Button
               className="w-full h-12 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl"
               onClick={handleRequestRide}
               disabled={isLoading}
             >
-              {isLoading ? (
-                <Loader2 className="w-4 h-4 animate-spin mr-2" />
-              ) : (
-                <Car className="w-4 h-4 mr-2" />
-              )}
+              {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : <Car className="w-4 h-4 mr-2" />}
               Confirmer — {selectedServiceData.name}
             </Button>
           </div>
         )}
 
-        {/* ── ÉTAPE 3 : En attente d'un chauffeur ── */}
+        {/* ── ÉTAPE 3 : En attente ── */}
         {step === 'waiting' && (
           <div className="space-y-4 py-4">
             <div className="text-center">
               <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
                 <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
               </div>
-              <h3 className="font-bold text-gray-900 text-lg">Recherche d'un chauffeur</h3>
+              <h3 className="font-bold text-gray-900 text-lg">Recherche d&apos;un chauffeur</h3>
               <p className="text-gray-400 text-sm mt-1">
                 {nearbyDrivers > 0
                   ? `${nearbyDrivers} chauffeur${nearbyDrivers > 1 ? 's' : ''} disponible${nearbyDrivers > 1 ? 's' : ''} à proximité`
-                  : 'Aucun chauffeur disponible pour l\'instant...'}
+                  : "Aucun chauffeur disponible pour l'instant..."}
               </p>
             </div>
-
             <div className="bg-gray-50 rounded-xl p-4 space-y-2">
               <div className="flex items-center gap-2 text-sm">
                 <div className="w-3 h-3 bg-black rounded-full" />
@@ -528,17 +526,11 @@ export default function ClientHomePage() {
                 <span className="text-gray-600 truncate">{destination}</span>
               </div>
             </div>
-
             <div className="flex items-center justify-between text-sm bg-gray-50 rounded-xl p-3">
               <span className="text-gray-500">{selectedServiceData.name}</span>
               <span className="font-bold text-gray-900">${est.price.toFixed(2)}</span>
             </div>
-
-            <Button
-              variant="outline"
-              className="w-full h-11 border-red-200 text-red-600 hover:bg-red-50"
-              onClick={handleCancel}
-            >
+            <Button variant="outline" className="w-full h-11 border-red-200 text-red-600 hover:bg-red-50" onClick={handleCancel}>
               <X className="w-4 h-4 mr-2" />
               Annuler la demande
             </Button>
@@ -548,7 +540,6 @@ export default function ClientHomePage() {
         {/* ── ÉTAPE 4 : Course active ── */}
         {step === 'active' && activeRide && (
           <div className="space-y-4 py-2">
-            {/* Statut */}
             <div className="flex items-center gap-3 bg-green-50 rounded-xl p-3">
               <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
                 <Car className="w-5 h-5 text-green-600" />
@@ -565,8 +556,6 @@ export default function ClientHomePage() {
                 <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
               </div>
             </div>
-
-            {/* Infos chauffeur */}
             <div className="bg-gray-50 rounded-xl p-4 space-y-3">
               <div className="flex items-center gap-3">
                 <div className="w-12 h-12 bg-gray-200 rounded-full flex items-center justify-center">
@@ -578,14 +567,13 @@ export default function ClientHomePage() {
                     <Star className="w-3 h-3 text-yellow-400 fill-current" />
                     <span>4.9</span>
                     <span>·</span>
-                    <span>{activeRide.serviceType?.replace('kulooc_', 'KULOOC ').toUpperCase()}</span>
+                    <span>{activeRide.serviceType}</span>
                   </div>
                 </div>
                 <button className="w-10 h-10 bg-black rounded-full flex items-center justify-center">
                   <Phone className="w-4 h-4 text-white" />
                 </button>
               </div>
-
               <div className="space-y-2 pt-2 border-t border-gray-200">
                 <div className="flex items-center gap-2 text-sm">
                   <div className="w-3 h-3 bg-black rounded-full flex-shrink-0" />
@@ -597,8 +585,6 @@ export default function ClientHomePage() {
                 </div>
               </div>
             </div>
-
-            {/* Prix estimé */}
             {activeRide.pricing && (
               <div className="flex items-center justify-between bg-gray-50 rounded-xl p-3">
                 <span className="text-sm text-gray-500">Tarif estimé</span>
