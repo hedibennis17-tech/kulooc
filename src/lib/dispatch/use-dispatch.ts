@@ -118,7 +118,9 @@ export function useDispatch(): UseDispatchReturn {
     if (!driver) return { success: false, error: 'Chauffeur introuvable' };
     try {
       const engine = getDispatchEngine(db);
-      const result = await engine.acceptOffer(requestId, driverId, driver.name, driver.location ?? null);
+      const driverName = (driver as any).driverName || (driver as any).name || (driver as any).displayName || 'Chauffeur';
+      const driverLoc = (driver as any).currentLocation || driver.location || null;
+      const result = await engine.acceptOffer(requestId, driverId, driverName, driverLoc);
       return result;
     } catch (err: any) {
       return { success: false, error: err?.message || 'Erreur inconnue' };

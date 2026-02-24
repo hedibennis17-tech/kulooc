@@ -185,7 +185,7 @@ export class DispatchEngine {
     try {
       await updateDoc(doc(this.db, 'ride_requests', requestId), {
         offeredToDriverId: best.id,
-        offeredToDriverName: best.name,
+        offeredToDriverName: (best as any).driverName || best.name || 'Chauffeur',
         offerExpiresAt: Timestamp.fromDate(offerExpiresAt),
         offerSentAt: serverTimestamp(),
         status: 'offered', // Nouveau statut : offre envoyée
@@ -238,7 +238,10 @@ export class DispatchEngine {
   }
 
   // Appelé quand un chauffeur accepte
-  async acceptOffer(requestId: string, driverId: string, driverName: string, driverLocation: { latitude: number; longitude: number } | null) {
+  async acceptOffer(requestId: string, driverId: string, driverName: string | undefined | null, driverLocation: { latitude: number; longitude: number } | null | undefined) {
+    // Protéger contre les valeurs undefined qui causent une erreur Firestore
+    const safeName = driverName || 'Chauffeur';
+    const safeLocation = driverLocation ?? null;
     const timeout = this.offerTimeouts.get(requestId);
     if (timeout) {
       clearTimeout(timeout);
@@ -263,8 +266,8 @@ export class DispatchEngine {
           passengerName: reqData.passengerName,
           passengerPhone: reqData.passengerPhone || '',
           driverId,
-          driverName,
-          driverLocation,
+          driverName: safeName,
+          driverLocation: safeLocation,
           pickup: reqData.pickup,
           destination: reqData.destination,
           serviceType: reqData.serviceType,
@@ -291,7 +294,7 @@ export class DispatchEngine {
         tx.update(reqRef, {
           status: 'driver-assigned',
           driverId,
-          driverName,
+          driverName: safeName,
           assignedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           activeRideId: rideRef.id,

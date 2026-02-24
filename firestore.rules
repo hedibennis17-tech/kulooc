@@ -270,7 +270,15 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
-    // ── Règle par défaut : tout refuser ───────────────────────────────────────
+    // ── driver_offers ─────────────────────────────────────────────────────────
+    match /driver_offers/{offerId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update: if isSignedIn();
+      allow delete: if isAdmin();
+    }
+
+    // ── Règle par défaut : tout refuser ───────────────────────────────────────────
     match /{document=**} {
       allow read, write: if isAdmin();
     }
