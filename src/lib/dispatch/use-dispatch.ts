@@ -10,7 +10,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   collection, query, where, orderBy, limit,
   onSnapshot, doc, updateDoc, addDoc, setDoc,
-  serverTimestamp, getDocs,
+  serverTimestamp, getDocs, getDoc,
 } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { getDispatchEngine } from './dispatch-engine';
@@ -128,26 +128,24 @@ export function useDispatch(): UseDispatchReturn {
     return 1.0;
   })();
 
-  // ─── Assignation manuelle ──────────────────────────────────────────────────
+  // ─── Manual assignment (from dispatch panel) ─────────────────────────────
   const assignDriver = useCallback(async (requestId: string, driverId: string): Promise<{ success: boolean; error?: string }> => {
     const driver = drivers.find((d) => d.id === driverId);
     if (!driver) return { success: false, error: 'Chauffeur introuvable' };
     try {
       const engine = getDispatchEngine(db);
-      const result = await engine.acceptOffer(requestId, driverId, driver.name, driver.location ?? null);
+      const result = await engine.directAssign(requestId, driverId, driver.name, driver.location ?? null);
       return result;
     } catch (err: any) {
       return { success: false, error: err?.message || 'Erreur inconnue' };
     }
   }, [drivers]);
 
-  // ─── Assignation automatique ──────────────────────────────────────────────
+  // ─── Auto-assign (trigger the dispatch engine for a specific request) ─────
   const autoAssign = useCallback(async (requestId: string): Promise<{ success: boolean; error?: string }> => {
     setAutoAssigning(requestId);
     try {
       const engine = getDispatchEngine(db);
-      // Charger la demande depuis Firestore puis la traiter
-      const { getDoc, doc } = await import('firebase/firestore');
       const snap = await getDoc(doc(db, 'ride_requests', requestId));
       if (!snap.exists()) return { success: false, error: 'Demande introuvable' };
       const request = { id: snap.id, ...snap.data() } as any;

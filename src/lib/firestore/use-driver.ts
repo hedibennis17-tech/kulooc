@@ -2,7 +2,8 @@
 
 /**
  * KULOOC — Hook useDriver
- * Gère l'état complet du chauffeur: statut, position GPS, demandes entrantes, course active
+ * Manages driver state: status, GPS, incoming requests, active ride, and ride lifecycle.
+ * Uses the dispatch engine for accepting rides (single source of truth).
  */
 
 import { useState, useEffect, useCallback, useRef } from 'react';
@@ -27,6 +28,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { calculateFare } from '@/lib/services/fare-service';
+import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
 
 export type DriverStatus = 'offline' | 'online' | 'en-route' | 'on-trip' | 'busy';
 
@@ -38,7 +40,7 @@ export type UseDriverReturn = {
   currentLocation: { latitude: number; longitude: number } | null;
   isLoading: boolean;
   error: string | null;
-  onlineDuration: number; // seconds
+  onlineDuration: number;
   earningsToday: number;
   ridesCompleted: number;
   goOnline: () => Promise<void>;
@@ -64,14 +66,16 @@ export function useDriver(): UseDriverReturn {
   const onlineTimerRef = useRef<NodeJS.Timeout | null>(null);
   const gpsWatchRef = useRef<number | null>(null);
   const rideStartTimeRef = useRef<Date | null>(null);
+  // Track the last completed ride to avoid double-counting
+  const lastCompletedRideRef = useRef<string | null>(null);
 
   const isOnline = driverStatus !== 'offline';
 
-  // Ref pour accéder à activeRide dans le callback GPS sans re-créer le watcher
+  // Ref for accessing activeRide in GPS callback
   const activeRideRef = useRef<typeof activeRide>(null);
   useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
 
-  // ─── Écouter les demandes en attente ─────────────────────────────────────
+  // ─── Listen to pending requests ──────────────────────────────────────────
   useEffect(() => {
     if (!isOnline || !user) return;
     const unsub = subscribeToDriverPendingRequests((requests) => {
@@ -80,9 +84,10 @@ export function useDriver(): UseDriverReturn {
     return unsub;
   }, [isOnline, user]);
 
-  // ─── Écouter la course active ─────────────────────────────────────────────
+  // ─── Listen to active ride ───────────────────────────────────────────────
   useEffect(() => {
     if (!user?.uid) return;
+
     const unsub = subscribeToDriverActiveRide(user.uid, (ride) => {
       setActiveRide(ride);
       if (ride) {
@@ -91,18 +96,14 @@ export function useDriver(): UseDriverReturn {
         } else if (ride.status === 'in-progress') {
           setDriverStatus('on-trip');
           if (!rideStartTimeRef.current) rideStartTimeRef.current = new Date();
-        } else if (ride.status === 'completed') {
-          setDriverStatus('online');
-          setEarningsToday(prev => prev + (ride.pricing?.total ?? 0));
-          setRidesCompleted(prev => prev + 1);
-          rideStartTimeRef.current = null;
         }
       }
     });
+
     return unsub;
   }, [user?.uid]);
 
-  // ─── Timer en ligne ───────────────────────────────────────────────────────
+  // ─── Online timer ────────────────────────────────────────────────────────
   useEffect(() => {
     if (isOnline) {
       onlineTimerRef.current = setInterval(() => {
@@ -117,7 +118,7 @@ export function useDriver(): UseDriverReturn {
     };
   }, [isOnline]);
 
-  // ─── GPS tracking ─────────────────────────────────────────────────────────
+  // ─── GPS tracking ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isOnline || !user?.uid || typeof navigator === 'undefined') return;
 
@@ -142,7 +143,7 @@ export function useDriver(): UseDriverReturn {
           }
         },
         (_err) => {
-          // Fallback: position simulée dans Laval
+          // Fallback: simulated position in Laval
           const fallback = {
             latitude: 45.5631 + (Math.random() - 0.5) * 0.02,
             longitude: -73.7124 + (Math.random() - 0.5) * 0.02,
@@ -160,7 +161,7 @@ export function useDriver(): UseDriverReturn {
     };
   }, [isOnline, user?.uid]);
 
-  // ─── Actions ──────────────────────────────────────────────────────────────
+  // ─── Actions ─────────────────────────────────────────────────────────────
 
   const goOnline = useCallback(async () => {
     if (!user?.uid) return;
@@ -189,50 +190,25 @@ export function useDriver(): UseDriverReturn {
     }
   }, [user?.uid]);
 
+  /**
+   * Accept a ride request using the Dispatch Engine (atomic transaction).
+   * This ensures no race conditions or duplicate active_rides.
+   */
   const acceptRide = useCallback(async (request: RideRequest) => {
     if (!user?.uid || !request.id) return;
     setIsLoading(true);
+    setError(null);
     try {
-      await updateDoc(doc(db, 'ride_requests', request.id), {
-        status: 'driver-assigned',
-        driverId: user.uid,
-        driverName: user.displayName || user.email || 'Chauffeur',
-        assignedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-      });
-
-      const fare = calculateFare(
-        request.estimatedDistanceKm,
-        request.estimatedDurationMin,
-        request.surgeMultiplier || 1.0,
-        request.serviceType
+      const engine = getDispatchEngine(db);
+      const result = await engine.acceptOffer(
+        request.id,
+        user.uid,
+        user.displayName || user.email || 'Chauffeur',
+        currentLocation
       );
-
-      await addDoc(collection(db, 'active_rides'), {
-        requestId: request.id,
-        passengerId: request.passengerId,
-        passengerName: request.passengerName,
-        passengerPhone: request.passengerPhone || '',
-        driverId: user.uid,
-        driverName: user.displayName || user.email || 'Chauffeur',
-        driverLocation: currentLocation,
-        pickup: request.pickup,
-        destination: request.destination,
-        serviceType: request.serviceType,
-        estimatedPrice: fare.total,
-        estimatedDistanceKm: request.estimatedDistanceKm,
-        estimatedDurationMin: request.estimatedDurationMin,
-        status: 'driver-assigned',
-        pricing: fare,
-        assignedAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        rideStartedAt: null,
-        rideCompletedAt: null,
-        finalPrice: null,
-        driverRating: null,
-        passengerRating: null,
-      });
-
+      if (!result.success) {
+        throw new Error(result.error || 'Echec de l\'assignation');
+      }
       setDriverStatus('en-route');
     } catch (err: any) {
       setError(err.message);
@@ -248,12 +224,12 @@ export function useDriver(): UseDriverReturn {
   const arrivedAtPickup = useCallback(async () => {
     if (!activeRide?.id) return;
     await updateRideStatus(activeRide.id, 'driver-arrived');
-    // Notifier le passager
+    // Notify passenger
     if (activeRide.passengerId) {
       await addDoc(collection(db, 'notifications'), {
         userId: activeRide.passengerId,
         type: 'driver_arrived',
-        title: 'Votre chauffeur est arrivé !',
+        title: 'Votre chauffeur est arrive !',
         body: 'Votre taxi KULOOC est devant vous.',
         rideId: activeRide.id,
         read: false,
@@ -272,15 +248,23 @@ export function useDriver(): UseDriverReturn {
     rideStartTimeRef.current = new Date();
   }, [activeRide]);
 
+  /**
+   * Complete ride: compute final fare, create completed_rides entry,
+   * create a transaction record, and reset driver status.
+   */
   const completeRide = useCallback(async () => {
     if (!activeRide?.id || !user?.uid) return;
+    // Prevent double completion
+    if (lastCompletedRideRef.current === activeRide.id) return;
+    lastCompletedRideRef.current = activeRide.id;
+
     setIsLoading(true);
     try {
       const rideSnap = await getDoc(doc(db, 'active_rides', activeRide.id));
       if (!rideSnap.exists()) throw new Error('Course introuvable');
       const rideData = rideSnap.data();
 
-      // Calculer le tarif final (basé sur la durée réelle si disponible)
+      // Compute final fare based on actual duration
       const rideStartedAt = rideData.rideStartedAt?.toDate?.() || rideStartTimeRef.current || new Date();
       const actualDurationMin = Math.max(1, Math.round((Date.now() - rideStartedAt.getTime()) / 60000));
       const finalFare = calculateFare(
@@ -289,6 +273,9 @@ export function useDriver(): UseDriverReturn {
         rideData.surgeMultiplier || rideData.pricing?.surgeMultiplier || 1.0,
         rideData.serviceType || 'KULOOC X'
       );
+
+      const driverEarnings = +(finalFare.total * 0.70).toFixed(2);
+      const platformFee = +(finalFare.total * 0.30).toFixed(2);
 
       const completedRideData = {
         ...rideData,
@@ -301,12 +288,11 @@ export function useDriver(): UseDriverReturn {
         rideCompletedAt: serverTimestamp(),
         completedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        // Répartition
-        driverEarnings: +(finalFare.total * 0.70).toFixed(2),
-        platformFee: +(finalFare.total * 0.30).toFixed(2),
+        driverEarnings,
+        platformFee,
       };
 
-      // Mettre à jour active_ride
+      // 1. Update active_ride to completed
       await updateDoc(doc(db, 'active_rides', activeRide.id), {
         status: 'completed',
         finalPricing: finalFare,
@@ -315,14 +301,49 @@ export function useDriver(): UseDriverReturn {
         actualDurationMin,
         rideCompletedAt: serverTimestamp(),
         updatedAt: serverTimestamp(),
-        driverEarnings: completedRideData.driverEarnings,
-        platformFee: completedRideData.platformFee,
+        driverEarnings,
+        platformFee,
       });
 
-      // Copier dans completed_rides
+      // 2. Copy to completed_rides
       await setDoc(doc(db, 'completed_rides', activeRide.id), completedRideData);
 
-      // Mettre à jour ride_request
+      // 3. Create transaction record
+      await addDoc(collection(db, 'transactions'), {
+        rideId: activeRide.id,
+        requestId: rideData.requestId || null,
+        passengerId: rideData.passengerId,
+        passengerName: rideData.passengerName,
+        driverId: user.uid,
+        driverName: rideData.driverName || user.displayName || 'Chauffeur',
+        serviceType: rideData.serviceType,
+        pickup: rideData.pickup,
+        destination: rideData.destination,
+        // Fare breakdown
+        fare: finalFare,
+        subtotal: finalFare.subtotalWithSurge || finalFare.subtotal,
+        tps: finalFare.tps,
+        tvq: finalFare.tvq,
+        total: finalFare.total,
+        driverEarnings,
+        platformFee,
+        surgeMultiplier: finalFare.surgeMultiplier,
+        actualDurationMin,
+        distanceKm: finalFare.distanceKm,
+        // Status
+        status: 'completed',
+        type: 'ride_payment',
+        currency: 'CAD',
+        paymentMethod: rideData.paymentMethod || 'card',
+        // Timestamps
+        rideStartedAt: rideData.rideStartedAt || null,
+        rideCompletedAt: serverTimestamp(),
+        createdAt: serverTimestamp(),
+      }).catch((err) => {
+        console.error('[Driver] Failed to create transaction:', err);
+      });
+
+      // 4. Update ride_request if exists
       if (rideData.requestId) {
         await updateDoc(doc(db, 'ride_requests', rideData.requestId), {
           status: 'completed',
@@ -331,7 +352,7 @@ export function useDriver(): UseDriverReturn {
         }).catch(() => {});
       }
 
-      // Remettre le chauffeur en ligne
+      // 5. Reset driver to online
       await updateDriverStatus(user.uid, 'online');
       await updateDoc(doc(db, 'drivers', user.uid), {
         currentRideId: null,
@@ -339,12 +360,27 @@ export function useDriver(): UseDriverReturn {
         updatedAt: serverTimestamp(),
       }).catch(() => {});
 
+      // 6. Notify passenger
+      if (rideData.passengerId) {
+        await addDoc(collection(db, 'notifications'), {
+          userId: rideData.passengerId,
+          type: 'ride_completed',
+          title: 'Course terminee !',
+          body: `Total: ${finalFare.total.toFixed(2)} $ CAD`,
+          rideId: activeRide.id,
+          read: false,
+          createdAt: serverTimestamp(),
+        }).catch(() => {});
+      }
+
       setDriverStatus('online');
-      setEarningsToday(prev => prev + (completedRideData.driverEarnings || 0));
+      setEarningsToday(prev => prev + driverEarnings);
       setRidesCompleted(prev => prev + 1);
       rideStartTimeRef.current = null;
     } catch (err: any) {
       setError(err.message);
+      // Reset the guard so user can retry
+      lastCompletedRideRef.current = null;
     } finally {
       setIsLoading(false);
     }

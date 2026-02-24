@@ -4,9 +4,8 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useUser } from '@/firebase/provider';
 import { useFirestore } from '@/firebase/provider';
 import { createRideRequest, cancelRideRequest } from '@/lib/client/client-service';
-import { subscribeToLiveDrivers, subscribeToPassengerRide, updateClientPresence, findBestDriver, type LiveDriver, type LiveActiveRide } from '@/lib/realtime/realtime-service';
+import { subscribeToLiveDrivers, subscribeToPassengerRide, updateClientPresence, type LiveDriver, type LiveActiveRide } from '@/lib/realtime/realtime-service';
 import { calculateFare } from '@/lib/services/fare-service';
-import { doc, collection, runTransaction, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -375,160 +374,14 @@ export default function ClientHomePage() {
         estimatedDistanceKm: est.distance,
         surgeMultiplier: 1.0,
       });
-      console.log('[v0] Ride request created:', requestId, 'liveDrivers count:', liveDrivers.length);
       setCurrentRequestId(requestId);
       setStep('waiting');
       toast({ title: 'Course demandee !', description: 'Recherche d\'un chauffeur en cours...' });
-
-      // Client-side auto-dispatch: try to find and assign nearest driver
-      tryAutoAssign(requestId, est);
     } catch (err) {
       console.log('[v0] createRideRequest error:', err);
       toast({ title: 'Erreur', description: 'Impossible de creer la course.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
-    }
-  };
-
-  const tryAutoAssign = async (requestId: string, est: { price: number; distance: number; duration: number }) => {
-    console.log('[v0] tryAutoAssign called', { requestId, db: !!db, pickupCoords, destCoords });
-    if (!db || !pickupCoords || !destCoords) {
-      console.log('[v0] tryAutoAssign aborted: missing db or coords');
-      return;
-    }
-
-    // Wait 3 seconds for the dispatch engine to pick it up
-    await new Promise(r => setTimeout(r, 3000));
-
-    // Check if already assigned by dispatch engine
-    let currentStatus = 'unknown';
-    try {
-      const { getDoc } = await import('firebase/firestore');
-      const reqSnap = await getDoc(doc(db, 'ride_requests', requestId));
-      if (!reqSnap.exists()) {
-        console.log('[v0] Request doc does not exist');
-        return;
-      }
-      currentStatus = reqSnap.data().status;
-      console.log('[v0] Current request status:', currentStatus);
-      if (currentStatus !== 'pending') {
-        console.log('[v0] Request already handled, status:', currentStatus);
-        return;
-      }
-    } catch (err) {
-      console.log('[v0] Error checking request status:', err);
-      return;
-    }
-
-    // Find best driver from live drivers
-    console.log('[v0] Live drivers available:', liveDrivers.length, liveDrivers.map(d => ({ id: d.id, name: d.name, status: d.status, hasLocation: !!d.location })));
-    
-    const request = {
-      id: requestId,
-      passengerId: user!.uid,
-      passengerName: user!.displayName || 'Passager',
-      pickup: { latitude: pickupCoords.lat, longitude: pickupCoords.lng, address: pickup },
-      destination: { latitude: destCoords.lat, longitude: destCoords.lng, address: destination },
-      serviceType: SERVICE_NAME_MAP[selectedService] || 'KULOOC X',
-      estimatedPrice: est.price,
-      estimatedDistanceKm: est.distance,
-      estimatedDurationMin: est.duration,
-      surgeMultiplier: 1.0,
-      status: 'pending' as const,
-    };
-
-    const bestDriver = findBestDriver(request, liveDrivers);
-    if (!bestDriver) {
-      console.log('[v0] No nearby driver found for auto-assign. Online drivers:', liveDrivers.filter(d => d.status === 'online').length);
-      // Fallback: just pick any online driver regardless of distance
-      const anyOnline = liveDrivers.find(d => d.status === 'online');
-      if (!anyOnline) {
-        console.log('[v0] No online driver at all');
-        return;
-      }
-      console.log('[v0] Fallback: using any online driver:', anyOnline.name, anyOnline.id);
-      await doAssignDriver(db, requestId, anyOnline, request, est);
-      return;
-    }
-
-    console.log('[v0] Best driver found:', bestDriver.name, bestDriver.id);
-    await doAssignDriver(db, requestId, bestDriver, request, est);
-  };
-
-  const doAssignDriver = async (
-    dbRef: any, 
-    requestId: string, 
-    driver: LiveDriver, 
-    request: any, 
-    est: { price: number; distance: number; duration: number }
-  ) => {
-    const fare = calculateFare(est.distance, est.duration, 1.0, request.serviceType);
-    console.log('[v0] Fare calculated:', fare);
-
-    try {
-      await runTransaction(dbRef, async (tx: any) => {
-        const reqRef = doc(dbRef, 'ride_requests', requestId);
-        const driverRef = doc(dbRef, 'drivers', driver.id);
-        const reqSnap = await tx.get(reqRef);
-        const drvSnap = await tx.get(driverRef);
-
-        console.log('[v0] TX - request exists:', reqSnap.exists(), 'status:', reqSnap.data()?.status);
-        console.log('[v0] TX - driver exists:', drvSnap.exists(), 'status:', drvSnap.data()?.status);
-
-        if (!reqSnap.exists() || reqSnap.data().status !== 'pending') {
-          console.log('[v0] TX aborted: request not pending');
-          return;
-        }
-        if (!drvSnap.exists() || !['online', 'available'].includes(drvSnap.data().status)) {
-          console.log('[v0] TX aborted: driver not online, status:', drvSnap.data()?.status);
-          return;
-        }
-
-        const rideRef = doc(collection(dbRef, 'active_rides'));
-        console.log('[v0] Creating active_ride:', rideRef.id);
-
-        tx.set(rideRef, {
-          requestId,
-          passengerId: user!.uid,
-          passengerName: user!.displayName || user!.email?.split('@')[0] || 'Passager',
-          passengerPhone: user!.phoneNumber || '',
-          driverId: driver.id,
-          driverName: driver.name,
-          driverLocation: driver.location || null,
-          pickup: request.pickup,
-          destination: request.destination,
-          serviceType: request.serviceType,
-          estimatedPrice: fare.total,
-          estimatedDistanceKm: fare.distanceKm,
-          estimatedDurationMin: fare.durationMin,
-          surgeMultiplier: fare.surgeMultiplier,
-          status: 'driver-assigned',
-          pricing: fare,
-          assignedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          rideStartedAt: null,
-          rideCompletedAt: null,
-          finalPrice: null,
-        });
-
-        tx.update(reqRef, {
-          status: 'driver-assigned',
-          driverId: driver.id,
-          driverName: driver.name,
-          assignedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-        });
-
-        tx.update(driverRef, {
-          status: 'en-route',
-          currentRideId: rideRef.id,
-          updatedAt: serverTimestamp(),
-        });
-      });
-      console.log('[v0] Auto-assign transaction SUCCESS');
-      toast({ title: 'Chauffeur assigne !', description: `${driver.name} est en route vers vous.` });
-    } catch (err: any) {
-      console.log('[v0] Auto-assign transaction FAILED:', err?.message || err, err?.code);
     }
   };
 

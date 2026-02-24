@@ -1,21 +1,31 @@
 'use client';
 /**
- * KULOOC Dispatch Engine
- * Moteur d'assignation automatique en temps réel
- * - File d'attente par zone (H3-like grid 1km²)
- * - Chauffeur le plus proche + le plus longtemps en attente
- * - Timeout 60s → chauffeur suivant
- * - Notification push au chauffeur via Firestore
+ * KULOOC Dispatch Engine v2
+ * Single source of truth for ride assignment.
+ *
+ * Flow:
+ * 1. Client creates ride_request (status: 'pending')
+ * 2. Engine detects new pending request
+ * 3. Engine finds best available driver
+ * 4. Engine creates driver_offer (status: 'pending', 60s timeout)
+ * 5. Driver accepts → Engine runs atomic transaction:
+ *    - ride_request → 'driver-assigned'
+ *    - active_rides → created
+ *    - driver → 'en-route'
+ * 6. Driver completes ride → Engine creates transaction record
+ *
+ * AUTO-ASSIGN MODE: If no driver_offers system is needed (e.g. closest driver
+ * gets auto-assigned), the engine directly assigns without an offer step.
  */
 import {
   collection, doc, query, where, onSnapshot,
   runTransaction, serverTimestamp, updateDoc,
-  addDoc, getDoc, setDoc, Timestamp,
+  getDoc, setDoc, Timestamp, getDocs, limit,
   type Firestore,
 } from 'firebase/firestore';
 import { calculateFare } from '@/lib/services/fare-service';
 
-// ─── Helpers géographiques ────────────────────────────────────────────────────
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
   const R = 6371;
   const dLat = ((lat2 - lat1) * Math.PI) / 180;
@@ -59,98 +69,96 @@ export interface DispatchRequest {
   offerExpiresAt?: Timestamp | null;
 }
 
-// ─── Sélection du meilleur chauffeur ─────────────────────────────────────────
+// ─── Best Driver Selection ───────────────────────────────────────────────────
 function selectBestDriver(
   request: DispatchRequest,
-  drivers: DispatchDriver[]
+  drivers: DispatchDriver[],
+  excludeIds: string[] = []
 ): DispatchDriver | null {
   const available = drivers.filter(
     (d) =>
-      (d.status === 'online') &&
+      d.status === 'online' &&
       d.location &&
-      !d.currentRideId
+      !d.currentRideId &&
+      !excludeIds.includes(d.id)
   );
   if (available.length === 0) return null;
 
   const pickupLat = request.pickup.latitude;
   const pickupLng = request.pickup.longitude;
 
-  // Score = 50% temps d'attente + 30% distance + 20% note
   const scored = available.map((d) => {
     const distKm = haversineKm(
       d.location!.latitude, d.location!.longitude,
       pickupLat, pickupLng
     );
-    if (distKm > 30) return null; // Trop loin
+    // Accept drivers up to 30km (generous radius for testing)
+    if (distKm > 30) return null;
 
-    // Temps en ligne (en secondes depuis onlineSince)
     const waitSeconds = d.onlineSince
       ? (Date.now() / 1000) - (d.onlineSince as Timestamp).seconds
       : 0;
 
-    const distScore = Math.max(0, 1 - distKm / 15);        // 15km max
-    const waitScore = Math.min(1, waitSeconds / 3600);       // 1h = score max
+    const distScore = Math.max(0, 1 - distKm / 15);
+    const waitScore = Math.min(1, waitSeconds / 3600);
     const ratingScore = (d.averageRating || 4.5) / 5;
 
-    const total = 0.50 * waitScore + 0.30 * distScore + 0.20 * ratingScore;
-    return { driver: d, distKm, waitSeconds, score: total };
-  }).filter(Boolean) as Array<{ driver: DispatchDriver; distKm: number; waitSeconds: number; score: number }>;
+    const total = 0.50 * distScore + 0.30 * waitScore + 0.20 * ratingScore;
+    return { driver: d, distKm, score: total };
+  }).filter(Boolean) as Array<{ driver: DispatchDriver; distKm: number; score: number }>;
 
   if (scored.length === 0) return null;
   scored.sort((a, b) => b.score - a.score);
   return scored[0].driver;
 }
 
-// ─── Moteur principal ─────────────────────────────────────────────────────────
+// ─── Main Engine ──────────────────────────────────────────────────────────────
 export class DispatchEngine {
   private db: Firestore;
   private unsubRequests: (() => void) | null = null;
   private unsubDrivers: (() => void) | null = null;
   private drivers: DispatchDriver[] = [];
-  private requests: DispatchRequest[] = [];
-  private processingIds = new Set<string>(); // Éviter double-traitement
-  private offerTimeouts = new Map<string, NodeJS.Timeout>(); // requestId → timeout
+  private processingIds = new Set<string>();
+  private offerTimeouts = new Map<string, NodeJS.Timeout>();
+  private started = false;
 
   constructor(db: Firestore) {
     this.db = db;
   }
 
   start() {
-    console.log('[v0] DispatchEngine.start() called');
+    if (this.started) return; // Prevent double-start
+    this.started = true;
+    console.log('[Dispatch] Engine started');
 
-    // Écouter les chauffeurs en ligne
+    // Listen to active drivers
     const driversQ = query(
       collection(this.db, 'drivers'),
       where('status', 'in', ['online', 'en-route', 'on-trip'])
     );
     this.unsubDrivers = onSnapshot(driversQ, (snap) => {
       this.drivers = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DispatchDriver));
-      console.log('[v0] DispatchEngine: drivers updated, count:', this.drivers.length);
     }, (err) => {
-      console.error('[v0] DispatchEngine drivers listener error:', err.message, err);
+      console.error('[Dispatch] Drivers listener error:', err.message);
     });
 
-    // Écouter les nouvelles demandes pending
+    // Listen to pending requests and auto-process new ones
     const requestsQ = query(
       collection(this.db, 'ride_requests'),
       where('status', '==', 'pending')
     );
     this.unsubRequests = onSnapshot(requestsQ, (snap) => {
-      const newRequests = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DispatchRequest));
-      this.requests = newRequests;
-      console.log('[v0] DispatchEngine: pending requests updated, count:', newRequests.length);
-      // Traiter chaque nouvelle demande
       snap.docChanges().forEach((change) => {
         if (change.type === 'added') {
           const req = { id: change.doc.id, ...change.doc.data() } as DispatchRequest;
-          console.log('[v0] DispatchEngine: new request detected:', req.id, 'processing:', this.processingIds.has(req.id));
           if (!this.processingIds.has(req.id)) {
-            setTimeout(() => this.processRequest(req), 500);
+            // Small delay to let driver list update
+            setTimeout(() => this.processRequest(req), 800);
           }
         }
       });
     }, (err) => {
-      console.error('[v0] DispatchEngine requests listener error:', err.message, err);
+      console.error('[Dispatch] Requests listener error:', err.message);
     });
   }
 
@@ -160,53 +168,86 @@ export class DispatchEngine {
     this.offerTimeouts.forEach((t) => clearTimeout(t));
     this.offerTimeouts.clear();
     this.processingIds.clear();
+    this.started = false;
   }
 
+  /**
+   * Process a pending request: find best driver and create an offer
+   */
   public async processRequest(request: DispatchRequest) {
-    console.log('[v0] DispatchEngine.processRequest:', request.id, 'drivers available:', this.drivers.length);
     if (this.processingIds.has(request.id)) return;
     this.processingIds.add(request.id);
-
+    console.log('[Dispatch] Processing request:', request.id, 'available drivers:', this.drivers.filter(d => d.status === 'online').length);
     await this.offerToNextDriver(request.id, []);
   }
 
+  /**
+   * Find next available driver and send them an offer
+   */
   private async offerToNextDriver(requestId: string, excludedDriverIds: string[]) {
-    // Recharger la demande pour vérifier son statut
+    // Re-read the request to verify it's still pending
     const reqSnap = await getDoc(doc(this.db, 'ride_requests', requestId));
-    if (!reqSnap.exists() || reqSnap.data().status !== 'pending') {
+    if (!reqSnap.exists()) {
       this.processingIds.delete(requestId);
       return;
     }
-    const request = { id: reqSnap.id, ...reqSnap.data() } as DispatchRequest;
+    const reqData = reqSnap.data();
+    // Only process if still pending (not already assigned/cancelled)
+    if (reqData.status !== 'pending') {
+      this.processingIds.delete(requestId);
+      return;
+    }
+    const request = { id: reqSnap.id, ...reqData } as DispatchRequest;
 
-    // Filtrer les chauffeurs déjà refusés
-    const availableDrivers = this.drivers.filter(
-      (d) => !excludedDriverIds.includes(d.id)
-    );
+    // Find best driver excluding previously declined ones
+    const best = selectBestDriver(request, this.drivers, excludedDriverIds);
 
-    const best = selectBestDriver(request, availableDrivers);
     if (!best) {
-      // Aucun chauffeur disponible — laisser en pending
-      this.processingIds.delete(requestId);
+      console.log('[Dispatch] No driver available for request:', requestId);
+      // If we can't find any driver, also try ANY online driver as fallback
+      const anyOnline = this.drivers.find(
+        (d) => d.status === 'online' && !d.currentRideId && !excludedDriverIds.includes(d.id)
+      );
+      if (!anyOnline) {
+        this.processingIds.delete(requestId);
+        return;
+      }
+      // Use fallback driver
+      console.log('[Dispatch] Fallback to any online driver:', anyOnline.name);
+      await this.sendOffer(requestId, request, anyOnline, excludedDriverIds);
       return;
     }
 
-    // Offrir la course au chauffeur via Firestore
-    const offerExpiresAt = new Date(Date.now() + 60000); // 60 secondes
+    console.log('[Dispatch] Best driver for', requestId, ':', best.name, best.id);
+    await this.sendOffer(requestId, request, best, excludedDriverIds);
+  }
+
+  /**
+   * Send an offer to a specific driver
+   */
+  private async sendOffer(
+    requestId: string,
+    request: DispatchRequest,
+    driver: DispatchDriver,
+    excludedDriverIds: string[]
+  ) {
+    const offerExpiresAt = new Date(Date.now() + 60000); // 60 seconds
+
     try {
+      // Update request to 'offered' status
       await updateDoc(doc(this.db, 'ride_requests', requestId), {
-        offeredToDriverId: best.id,
-        offeredToDriverName: best.name,
+        offeredToDriverId: driver.id,
+        offeredToDriverName: driver.name,
         offerExpiresAt: Timestamp.fromDate(offerExpiresAt),
         offerSentAt: serverTimestamp(),
-        status: 'offered', // Nouveau statut : offre envoyée
+        status: 'offered',
         updatedAt: serverTimestamp(),
       });
 
-      // Créer une notification dans la collection du chauffeur
-      await setDoc(doc(this.db, 'driver_offers', `${requestId}_${best.id}`), {
+      // Create offer document for the driver
+      await setDoc(doc(this.db, 'driver_offers', `${requestId}_${driver.id}`), {
         requestId,
-        driverId: best.id,
+        driverId: driver.id,
         passengerId: request.passengerId,
         passengerName: request.passengerName,
         pickup: request.pickup,
@@ -215,41 +256,59 @@ export class DispatchEngine {
         estimatedPrice: request.estimatedPrice,
         estimatedDistanceKm: request.estimatedDistanceKm,
         estimatedDurationMin: request.estimatedDurationMin,
-        status: 'pending', // pending → accepted / declined
+        status: 'pending',
         expiresAt: Timestamp.fromDate(offerExpiresAt),
         createdAt: serverTimestamp(),
       });
 
-      // Timeout 60s : si pas de réponse → chauffeur suivant
+      // Set timeout: if driver doesn't respond in 60s, try next driver
       const timeout = setTimeout(async () => {
         this.offerTimeouts.delete(requestId);
-        // Vérifier si toujours en attente
-        const snap = await getDoc(doc(this.db, 'ride_requests', requestId));
-        if (snap.exists() && snap.data().status === 'offered') {
-          // Remettre en pending et essayer le prochain
-          await updateDoc(doc(this.db, 'ride_requests', requestId), {
-            status: 'pending',
-            offeredToDriverId: null,
-            offerExpiresAt: null,
-            updatedAt: serverTimestamp(),
-          });
-          // Marquer l'offre comme expirée
-          await updateDoc(doc(this.db, 'driver_offers', `${requestId}_${best.id}`), {
-            status: 'expired',
-          }).catch(() => {});
-          // Réessayer avec le prochain chauffeur
-          await this.offerToNextDriver(requestId, [...excludedDriverIds, best.id]);
+        try {
+          const snap = await getDoc(doc(this.db, 'ride_requests', requestId));
+          if (snap.exists() && snap.data().status === 'offered') {
+            // Reset to pending
+            await updateDoc(doc(this.db, 'ride_requests', requestId), {
+              status: 'pending',
+              offeredToDriverId: null,
+              offerExpiresAt: null,
+              updatedAt: serverTimestamp(),
+            });
+            // Mark offer as expired
+            await updateDoc(doc(this.db, 'driver_offers', `${requestId}_${driver.id}`), {
+              status: 'expired',
+            }).catch(() => {});
+            // Try next driver
+            await this.offerToNextDriver(requestId, [...excludedDriverIds, driver.id]);
+          }
+        } catch (e) {
+          console.error('[Dispatch] Offer timeout handling error:', e);
+          this.processingIds.delete(requestId);
         }
       }, 60000);
 
       this.offerTimeouts.set(requestId, timeout);
-    } catch (e) {
+    } catch (e: any) {
+      console.error('[Dispatch] Error sending offer:', e.message);
       this.processingIds.delete(requestId);
     }
   }
 
-  // Appelé quand un chauffeur accepte
-  async acceptOffer(requestId: string, driverId: string, driverName: string, driverLocation: { latitude: number; longitude: number } | null) {
+  /**
+   * Called when a driver accepts an offer.
+   * Runs an atomic Firestore transaction to:
+   * 1. Verify request is still offered/pending
+   * 2. Create the active_ride
+   * 3. Update ride_request status
+   * 4. Update driver status
+   */
+  async acceptOffer(
+    requestId: string,
+    driverId: string,
+    driverName: string,
+    driverLocation: { latitude: number; longitude: number } | null
+  ): Promise<{ success: boolean; error?: string }> {
+    // Clear offer timeout
     const timeout = this.offerTimeouts.get(requestId);
     if (timeout) {
       clearTimeout(timeout);
@@ -257,6 +316,8 @@ export class DispatchEngine {
     }
 
     try {
+      let createdRideId = '';
+
       await runTransaction(this.db, async (tx) => {
         const reqRef = doc(this.db, 'ride_requests', requestId);
         const drvRef = doc(this.db, 'drivers', driverId);
@@ -264,9 +325,18 @@ export class DispatchEngine {
 
         if (!reqSnap.exists()) throw new Error('Demande introuvable');
         const reqData = reqSnap.data();
-        if (reqData.status !== 'offered' && reqData.status !== 'pending') throw new Error('Demande déjà assignée');
-        if (reqData.offeredToDriverId && reqData.offeredToDriverId !== driverId) throw new Error('Offre destinée à un autre chauffeur');
 
+        // Allow both 'offered' and 'pending' status
+        if (reqData.status !== 'offered' && reqData.status !== 'pending') {
+          throw new Error(`Demande deja traitee (status: ${reqData.status})`);
+        }
+
+        // If offered to someone else, reject
+        if (reqData.status === 'offered' && reqData.offeredToDriverId && reqData.offeredToDriverId !== driverId) {
+          throw new Error('Offre destinee a un autre chauffeur');
+        }
+
+        // Compute fare
         const fare = calculateFare(
           reqData.estimatedDistanceKm || 5,
           reqData.estimatedDurationMin || 10,
@@ -274,7 +344,10 @@ export class DispatchEngine {
           reqData.serviceType || 'KULOOC X'
         );
 
+        // Create active ride
         const rideRef = doc(collection(this.db, 'active_rides'));
+        createdRideId = rideRef.id;
+
         tx.set(rideRef, {
           requestId,
           passengerId: reqData.passengerId,
@@ -282,7 +355,7 @@ export class DispatchEngine {
           passengerPhone: reqData.passengerPhone || '',
           driverId,
           driverName,
-          driverLocation,
+          driverLocation: driverLocation || null,
           pickup: reqData.pickup,
           destination: reqData.destination,
           serviceType: reqData.serviceType,
@@ -301,6 +374,7 @@ export class DispatchEngine {
           passengerRating: null,
         });
 
+        // Update request
         tx.update(reqRef, {
           status: 'driver-assigned',
           driverId,
@@ -310,6 +384,7 @@ export class DispatchEngine {
           activeRideId: rideRef.id,
         });
 
+        // Update driver
         if (drvSnap.exists()) {
           tx.update(drvRef, {
             status: 'en-route',
@@ -319,53 +394,72 @@ export class DispatchEngine {
         }
       });
 
-      // Marquer l'offre comme acceptée
+      // Mark offer as accepted (outside transaction, non-critical)
       await updateDoc(doc(this.db, 'driver_offers', `${requestId}_${driverId}`), {
         status: 'accepted',
       }).catch(() => {});
 
       this.processingIds.delete(requestId);
+      console.log('[Dispatch] Offer accepted, active_ride created:', createdRideId);
       return { success: true };
     } catch (e: any) {
+      console.error('[Dispatch] acceptOffer error:', e.message);
       return { success: false, error: e.message };
     }
   }
 
-  // Appelé quand un chauffeur refuse
+  /**
+   * Called when a driver declines an offer.
+   * Resets the request to pending and tries the next driver.
+   */
   async declineOffer(requestId: string, driverId: string) {
+    // Clear timeout
     const timeout = this.offerTimeouts.get(requestId);
     if (timeout) {
       clearTimeout(timeout);
       this.offerTimeouts.delete(requestId);
     }
 
-    // Marquer l'offre comme refusée
+    // Mark offer as declined
     await updateDoc(doc(this.db, 'driver_offers', `${requestId}_${driverId}`), {
       status: 'declined',
     }).catch(() => {});
 
-    // Remettre en pending et chercher le prochain
+    // Read current declined list
+    const reqSnap = await getDoc(doc(this.db, 'ride_requests', requestId));
+    if (!reqSnap.exists()) return;
+
+    const declinedByDriverIds = reqSnap.data().declinedByDriverIds || [];
+    const newExcluded = [...declinedByDriverIds, driverId];
+
+    // Reset to pending
     await updateDoc(doc(this.db, 'ride_requests', requestId), {
       status: 'pending',
       offeredToDriverId: null,
       offerExpiresAt: null,
+      declinedByDriverIds: newExcluded,
       updatedAt: serverTimestamp(),
     });
 
-    // Chercher le prochain chauffeur (exclure celui qui a refusé)
-    const reqSnap = await getDoc(doc(this.db, 'ride_requests', requestId));
-    if (reqSnap.exists()) {
-      const excludedFromPrev = reqSnap.data().declinedByDriverIds || [];
-      const newExcluded = [...excludedFromPrev, driverId];
-      await updateDoc(doc(this.db, 'ride_requests', requestId), {
-        declinedByDriverIds: newExcluded,
-      });
-      await this.offerToNextDriver(requestId, newExcluded);
-    }
+    // Try next driver
+    await this.offerToNextDriver(requestId, newExcluded);
+  }
+
+  /**
+   * Direct auto-assign without offer step.
+   * Used when you want to skip the driver offer flow and just assign directly.
+   */
+  async directAssign(
+    requestId: string,
+    driverId: string,
+    driverName: string,
+    driverLocation: { latitude: number; longitude: number } | null
+  ): Promise<{ success: boolean; error?: string }> {
+    return this.acceptOffer(requestId, driverId, driverName, driverLocation);
   }
 }
 
-// ─── Singleton global ─────────────────────────────────────────────────────────
+// ─── Singleton ────────────────────────────────────────────────────────────────
 let engineInstance: DispatchEngine | null = null;
 
 export function getDispatchEngine(db: Firestore): DispatchEngine {

@@ -174,7 +174,17 @@ export function subscribeToPassengerActiveRide(
     if (activeDoc) {
       callback({ id: activeDoc.id, ...activeDoc.data() } as ActiveRide);
     } else {
-      callback(null);
+      // Check for recently completed ride so passenger UI sees the completion
+      const completedDoc = snap.docs.find(d => {
+        if (d.data().status !== 'completed') return false;
+        const completedAt = d.data().rideCompletedAt?.toMillis?.() || d.data().completedAt?.toMillis?.() || 0;
+        return completedAt > 0 && (Date.now() - completedAt) < 5000;
+      });
+      if (completedDoc) {
+        callback({ id: completedDoc.id, ...completedDoc.data() } as ActiveRide);
+      } else {
+        callback(null);
+      }
     }
   }, (err) => {
     console.error('[v0] subscribeToPassengerActiveRide error:', err.message, err);
@@ -214,13 +224,23 @@ export function subscribeToDriverActiveRide(
   );
 
   return onSnapshot(q, (snap) => {
-    // Filter active statuses client-side
+    // Prioritize truly active rides; include 'completed' only briefly for UI transition
     const activeStatuses = ['driver-assigned', 'driver-arrived', 'in-progress'];
     const activeDoc = snap.docs.find(d => activeStatuses.includes(d.data().status));
     if (activeDoc) {
       callback({ id: activeDoc.id, ...activeDoc.data() } as ActiveRide);
     } else {
-      callback(null);
+      // Check for recently completed ride (within last 5 seconds) so UI sees completion
+      const completedDoc = snap.docs.find(d => {
+        if (d.data().status !== 'completed') return false;
+        const completedAt = d.data().rideCompletedAt?.toMillis?.() || d.data().completedAt?.toMillis?.() || 0;
+        return completedAt > 0 && (Date.now() - completedAt) < 5000;
+      });
+      if (completedDoc) {
+        callback({ id: completedDoc.id, ...completedDoc.data() } as ActiveRide);
+      } else {
+        callback(null);
+      }
     }
   }, (err) => {
     console.error('[v0] subscribeToDriverActiveRide error:', err.message, err);

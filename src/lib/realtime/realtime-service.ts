@@ -265,7 +265,17 @@ export function subscribeToPassengerRide(
       if (activeDoc) {
         callback({ id: activeDoc.id, ...(activeDoc.data() as Omit<LiveActiveRide, 'id'>) });
       } else {
-        callback(null);
+        // Check for recently completed rides so the client sees the completion event
+        const completedDoc = snap.docs.find(d => {
+          if (d.data().status !== 'completed') return false;
+          const completedAt = d.data().rideCompletedAt?.toMillis?.() || d.data().completedAt?.toMillis?.() || 0;
+          return completedAt > 0 && (Date.now() - completedAt) < 8000;
+        });
+        if (completedDoc) {
+          callback({ id: completedDoc.id, ...(completedDoc.data() as Omit<LiveActiveRide, 'id'>) });
+        } else {
+          callback(null);
+        }
       }
     },
     (err) => {
