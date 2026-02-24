@@ -39,6 +39,18 @@ service cloud.firestore {
         (isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)));
     }
 
+    // Vérifie si l'utilisateur est admin ou super admin (pour créer des comptes staff)
+    function isAdminOrSuperAdmin() {
+      return isSuperAdmin() ||
+        (isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)));
+    }
+
+    // Vérifie que l'utilisateur est staff (dans admin_users) — bloque les clients
+    function isStaff() {
+      return isSuperAdmin() ||
+        (isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)));
+    }
+
     function isRideParticipant(rideDoc) {
       return isSignedIn() && (
         request.auth.uid == rideDoc.userId ||
@@ -209,11 +221,20 @@ service cloud.firestore {
     }
 
     // ── admin_users ───────────────────────────────────────────────────────────
-    // Le super admin peut tout lire/écrire. Les autres admins peuvent lire leur propre doc.
+    // Super Admin : accès total
+    // Admin : peut lire la liste et créer des comptes staff (dispatcher, agent, developer)
+    // Staff : peut lire son propre document
+    // Clients (non admin_users) : AUCUN accès
     match /admin_users/{userId} {
-      allow get: if isSuperAdmin() || isOwner(userId);
-      allow list: if isSuperAdmin();
-      allow create, update: if isSuperAdmin() || isOwner(userId);
+      allow get: if isSuperAdmin() || isOwner(userId) || isAdmin();
+      allow list: if isSuperAdmin() || isAdmin();
+      // Super Admin peut tout créer/modifier
+      // Admin peut créer des comptes staff (sauf super-admin)
+      allow create: if isSuperAdmin() ||
+        (isAdmin() && request.resource.data.role != 'super_admin' && request.resource.data.role != 'super-admin');
+      allow update: if isSuperAdmin() ||
+        (isAdmin() && resource.data.role != 'super_admin' && resource.data.role != 'super-admin' &&
+         request.resource.data.role != 'super_admin' && request.resource.data.role != 'super-admin');
       allow delete: if isSuperAdmin();
     }
 

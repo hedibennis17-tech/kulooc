@@ -5,20 +5,27 @@
 export type AdminRole =
   | 'super_admin'
   | 'admin'
+  | 'dispatcher'
   | 'agent'
   | 'developer'
   | 'consultant'
   | 'manager';
+
+// Type d'utilisateur staff (pour la création de compte)
+export type StaffUserType = 'driver' | 'dispatcher' | 'agent' | 'developer' | 'admin';
 
 export interface AdminUser {
   uid: string;
   email: string;
   name: string;
   role: AdminRole;
+  userType?: StaffUserType;
   avatar?: string;
+  phone?: string;
   createdAt: Date;
   lastLogin?: Date;
   isActive: boolean;
+  createdBy?: string;
 }
 
 export type RolePermissions = {
@@ -30,6 +37,7 @@ export type RolePermissions = {
   canBlockAccounts: boolean;
   canBanAccounts: boolean;
   canAssignRoles: boolean;
+  canCreateStaffAccounts: boolean;
   canSendSMS: boolean;
   canSendEmail: boolean;
   canViewFinancials: boolean;
@@ -49,6 +57,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, RolePermissions> = {
     canBlockAccounts: true,
     canBanAccounts: true,
     canAssignRoles: true,
+    canCreateStaffAccounts: true,
     canSendSMS: true,
     canSendEmail: true,
     canViewFinancials: true,
@@ -66,12 +75,31 @@ export const ROLE_PERMISSIONS: Record<AdminRole, RolePermissions> = {
     canBlockAccounts: true,
     canBanAccounts: true,
     canAssignRoles: false,
+    canCreateStaffAccounts: true,
     canSendSMS: true,
     canSendEmail: true,
     canViewFinancials: true,
     canManagePromotions: true,
     canAccessDispatch: true,
     canViewReports: true,
+    canManageDevelopment: false,
+  },
+  dispatcher: {
+    canRead: true,
+    canWrite: true,
+    canDelete: false,
+    canApproveDocuments: false,
+    canActivateAccounts: false,
+    canBlockAccounts: false,
+    canBanAccounts: false,
+    canAssignRoles: false,
+    canCreateStaffAccounts: false,
+    canSendSMS: true,
+    canSendEmail: false,
+    canViewFinancials: false,
+    canManagePromotions: false,
+    canAccessDispatch: true,
+    canViewReports: false,
     canManageDevelopment: false,
   },
   agent: {
@@ -83,6 +111,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, RolePermissions> = {
     canBlockAccounts: false,
     canBanAccounts: false,
     canAssignRoles: false,
+    canCreateStaffAccounts: false,
     canSendSMS: true,
     canSendEmail: true,
     canViewFinancials: false,
@@ -100,6 +129,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, RolePermissions> = {
     canBlockAccounts: false,
     canBanAccounts: false,
     canAssignRoles: false,
+    canCreateStaffAccounts: false,
     canSendSMS: false,
     canSendEmail: false,
     canViewFinancials: false,
@@ -117,6 +147,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, RolePermissions> = {
     canBlockAccounts: false,
     canBanAccounts: false,
     canAssignRoles: false,
+    canCreateStaffAccounts: false,
     canSendSMS: false,
     canSendEmail: false,
     canViewFinancials: true,
@@ -134,6 +165,7 @@ export const ROLE_PERMISSIONS: Record<AdminRole, RolePermissions> = {
     canBlockAccounts: false,
     canBanAccounts: false,
     canAssignRoles: false,
+    canCreateStaffAccounts: false,
     canSendSMS: false,
     canSendEmail: false,
     canViewFinancials: true,
@@ -147,7 +179,8 @@ export const ROLE_PERMISSIONS: Record<AdminRole, RolePermissions> = {
 export const ROLE_LABELS: Record<AdminRole, string> = {
   super_admin: 'Super Administrateur',
   admin: 'Administrateur',
-  agent: 'Agent',
+  dispatcher: 'Dispatcher',
+  agent: 'Agent Support',
   developer: 'Développeur',
   consultant: 'Consultant',
   manager: 'Gestionnaire',
@@ -156,10 +189,29 @@ export const ROLE_LABELS: Record<AdminRole, string> = {
 export const ROLE_COLORS: Record<AdminRole, string> = {
   super_admin: 'bg-red-100 text-red-800 border-red-200',
   admin: 'bg-purple-100 text-purple-800 border-purple-200',
-  agent: 'bg-blue-100 text-blue-800 border-blue-200',
+  dispatcher: 'bg-blue-100 text-blue-800 border-blue-200',
+  agent: 'bg-cyan-100 text-cyan-800 border-cyan-200',
   developer: 'bg-green-100 text-green-800 border-green-200',
   consultant: 'bg-yellow-100 text-yellow-800 border-yellow-200',
   manager: 'bg-gray-100 text-gray-800 border-gray-200',
+};
+
+export const ROLE_BADGES: Record<AdminRole, string> = {
+  super_admin: '👑',
+  admin: '🛡️',
+  dispatcher: '📡',
+  agent: '🎧',
+  developer: '💻',
+  consultant: '📊',
+  manager: '📋',
+};
+
+export const USER_TYPE_LABELS: Record<StaffUserType, string> = {
+  driver: '🚗 Chauffeur',
+  dispatcher: '📡 Dispatcher',
+  agent: '🎧 Agent Support',
+  developer: '💻 Développeur',
+  admin: '🛡️ Administrateur',
 };
 
 // Super Admin email — seul lui peut assigner des rôles
