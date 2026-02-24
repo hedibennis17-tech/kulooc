@@ -29,6 +29,7 @@ import {
   runTransaction,
   getFirestore as getFS,
 } from 'firebase/firestore';
+import { calculateFare } from '@/lib/services/fare-service';
 
 export function useRealtime() {
   const [drivers, setDrivers] = useState<LiveDriver[]>([]);
@@ -140,6 +141,13 @@ export function useRealtime() {
 
           const rideRef = doc(collection(db, 'active_rides'));
 
+          const fare = calculateFare(
+            request.estimatedDistanceKm || 5,
+            request.estimatedDurationMin || 10,
+            request.surgeMultiplier || 1.0,
+            request.serviceType || 'KULOOC X'
+          );
+
           transaction.set(rideRef, {
             requestId,
             passengerId: request.passengerId,
@@ -150,12 +158,11 @@ export function useRealtime() {
             pickup: request.pickup,
             destination: request.destination,
             serviceType: request.serviceType,
+            estimatedPrice: fare.total,
+            estimatedDistanceKm: fare.distanceKm,
+            estimatedDurationMin: fare.durationMin,
             status: 'driver-assigned',
-            pricing: {
-              subtotal: +(request.estimatedPrice / 1.14975).toFixed(2),
-              tax: +(request.estimatedPrice - request.estimatedPrice / 1.14975).toFixed(2),
-              total: request.estimatedPrice,
-            },
+            pricing: fare,
             assignedAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });
@@ -205,6 +212,13 @@ export function useRealtime() {
           const driverRef = doc(db, 'drivers', driverId);
           const rideRef = doc(collection(db, 'active_rides'));
 
+          const fare = calculateFare(
+            request.estimatedDistanceKm || 5,
+            request.estimatedDurationMin || 10,
+            request.surgeMultiplier || 1.0,
+            request.serviceType || 'KULOOC X'
+          );
+
           transaction.set(rideRef, {
             requestId,
             passengerId: request.passengerId,
@@ -215,12 +229,11 @@ export function useRealtime() {
             pickup: request.pickup,
             destination: request.destination,
             serviceType: request.serviceType,
+            estimatedPrice: fare.total,
+            estimatedDistanceKm: fare.distanceKm,
+            estimatedDurationMin: fare.durationMin,
             status: 'driver-assigned',
-            pricing: {
-              subtotal: +(request.estimatedPrice / 1.14975).toFixed(2),
-              tax: +(request.estimatedPrice - request.estimatedPrice / 1.14975).toFixed(2),
-              total: request.estimatedPrice,
-            },
+            pricing: fare,
             assignedAt: serverTimestamp(),
             updatedAt: serverTimestamp(),
           });

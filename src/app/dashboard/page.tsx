@@ -87,7 +87,7 @@ export default function DashboardPage() {
       // Chauffeurs
       const driversSnap = await getDocs(collection(db, 'drivers'));
       const totalDrivers = driversSnap.size;
-      const activeDrivers = driversSnap.docs.filter(d => d.data().status === 'active').length;
+      const activeDrivers = driversSnap.docs.filter(d => ['online', 'en-route', 'on-trip'].includes(d.data().status)).length;
 
       // Documents en attente
       const docsSnap = await getDocs(query(collection(db, 'driver_documents'), where('status', '==', 'pending')));
@@ -197,13 +197,30 @@ export default function DashboardPage() {
 
   const getStatusBadge = (status: string) => {
     const map: Record<string, string> = {
-      completed: 'bg-green-900 text-green-300',
-      in_progress: 'bg-blue-900 text-blue-300',
-      pending: 'bg-yellow-900 text-yellow-300',
-      cancelled: 'bg-red-900 text-red-300',
-      assigned: 'bg-purple-900 text-purple-300',
+      'completed': 'bg-green-900 text-green-300',
+      'in-progress': 'bg-blue-900 text-blue-300',
+      'in_progress': 'bg-blue-900 text-blue-300',
+      'pending': 'bg-yellow-900 text-yellow-300',
+      'offered': 'bg-orange-900 text-orange-300',
+      'cancelled': 'bg-red-900 text-red-300',
+      'driver-assigned': 'bg-purple-900 text-purple-300',
+      'driver-arrived': 'bg-indigo-900 text-indigo-300',
     };
     return map[status] || 'bg-gray-800 text-gray-300';
+  };
+
+  const getStatusLabel = (status: string) => {
+    const map: Record<string, string> = {
+      'completed': 'Terminee',
+      'in-progress': 'En course',
+      'in_progress': 'En course',
+      'pending': 'En attente',
+      'offered': 'Offerte',
+      'cancelled': 'Annulee',
+      'driver-assigned': 'En route',
+      'driver-arrived': 'Sur place',
+    };
+    return map[status] || status;
   };
 
   return (
@@ -296,7 +313,7 @@ export default function DashboardPage() {
                     <div className="flex items-center gap-2 ml-2">
                       <span className="text-green-400 text-xs font-medium">${ride.amount.toFixed(2)}</span>
                       <Badge className={cn('text-xs', getStatusBadge(ride.status))}>
-                        {ride.status === 'in_progress' ? 'En route' : ride.status}
+                        {getStatusLabel(ride.status)}
                       </Badge>
                     </div>
                   </div>

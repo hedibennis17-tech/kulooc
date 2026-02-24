@@ -48,7 +48,7 @@ export interface RideRequest {
   estimatedDistance?: number;
   estimatedDistanceKm?: number;
   surgeMultiplier?: number;
-  status: 'pending' | 'accepted' | 'in_progress' | 'completed' | 'cancelled';
+  status: 'pending' | 'offered' | 'driver-assigned' | 'driver-arrived' | 'in-progress' | 'completed' | 'cancelled';
   createdAt: any;
   notes?: string;
 }

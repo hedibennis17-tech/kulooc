@@ -7,8 +7,6 @@ import { useDriver } from '@/lib/firestore/use-driver';
 import { useDriverOffer } from '@/lib/firestore/use-driver-offer';
 import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
 import { useToast } from '@/hooks/use-toast';
-import { db } from '@/firebase';
-import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
 import {
   Sheet,
   SheetContent,
@@ -28,6 +26,13 @@ function formatMoney(amount: number): string {
   return amount.toFixed(2) + ' $';
 }
 
+function openNavigation(latitude: number, longitude: number, address?: string) {
+  // Attempt to use native maps (Google Maps / Apple Maps)
+  const encoded = address ? encodeURIComponent(address) : `${latitude},${longitude}`;
+  const url = `https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`;
+  window.open(url, '_blank');
+}
+
 export default function DriverHomePage() {
   const { user, isUserLoading: userLoading } = useUser();
   const { toast } = useToast();
@@ -35,8 +40,6 @@ export default function DriverHomePage() {
   const [showPreferences, setShowPreferences] = useState(false);
   const [rideTimer, setRideTimer] = useState(0);
   const rideTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const engineStartedRef = useRef(false);
-
   const {
     isOnline,
     activeRide,
@@ -59,19 +62,6 @@ export default function DriverHomePage() {
     acceptOffer,
     declineOffer,
   } = useDriverOffer(currentLocation ?? null);
-
-  // Démarrer le moteur de dispatch quand le chauffeur est en ligne
-  useEffect(() => {
-    if (isOnline && !engineStartedRef.current) {
-      const engine = getDispatchEngine(db);
-      engine.start();
-      engineStartedRef.current = true;
-    } else if (!isOnline && engineStartedRef.current) {
-      const engine = getDispatchEngine(db);
-      engine.stop();
-      engineStartedRef.current = false;
-    }
-  }, [isOnline]);
 
   // Timer de course
   useEffect(() => {
@@ -364,28 +354,54 @@ export default function DriverHomePage() {
               </div>
 
               {activeRide.status === 'driver-assigned' && (
-                <button
-                  onClick={() => arrivedAtPickup()}
-                  className="w-full py-5 rounded-full bg-black text-white font-black text-lg shadow-lg flex items-center justify-center gap-2"
-                >
-                  <MapPin size={20} /> Je suis arrivé
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      const pickup = activeRide.pickup;
+                      if (pickup?.latitude && pickup?.longitude) {
+                        openNavigation(pickup.latitude, pickup.longitude, pickup.address);
+                      }
+                    }}
+                    className="flex-1 py-5 rounded-full bg-blue-600 text-white font-black text-lg shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Navigation size={20} /> Naviguer
+                  </button>
+                  <button
+                    onClick={() => arrivedAtPickup()}
+                    className="flex-[2] py-5 rounded-full bg-black text-white font-black text-lg shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <MapPin size={20} /> Je suis arrive
+                  </button>
+                </div>
               )}
               {activeRide.status === 'driver-arrived' && (
                 <button
                   onClick={() => startRide()}
                   className="w-full py-5 rounded-full bg-red-600 text-white font-black text-lg shadow-lg flex items-center justify-center gap-2"
                 >
-                  <Navigation size={20} /> Démarrer la course
+                  <Navigation size={20} /> Demarrer la course
                 </button>
               )}
               {activeRide.status === 'in-progress' && (
-                <button
-                  onClick={() => completeRide()}
-                  className="w-full py-5 rounded-full bg-green-600 text-white font-black text-lg shadow-lg flex items-center justify-center gap-2"
-                >
-                  <Star size={20} /> Terminer la course
-                </button>
+                <div className="flex gap-3">
+                  <button
+                    onClick={() => {
+                      const dest = activeRide.destination;
+                      if (dest?.latitude && dest?.longitude) {
+                        openNavigation(dest.latitude, dest.longitude, dest.address);
+                      }
+                    }}
+                    className="flex-1 py-5 rounded-full bg-blue-600 text-white font-black text-lg shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Navigation size={20} /> Naviguer
+                  </button>
+                  <button
+                    onClick={() => completeRide()}
+                    className="flex-[2] py-5 rounded-full bg-green-600 text-white font-black text-lg shadow-lg flex items-center justify-center gap-2"
+                  >
+                    <Star size={20} /> Terminer la course
+                  </button>
+                </div>
               )}
             </div>
           </SheetContent>

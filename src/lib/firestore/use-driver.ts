@@ -286,7 +286,7 @@ export function useDriver(): UseDriverReturn {
       const finalFare = calculateFare(
         rideData.estimatedDistanceKm || rideData.pricing?.distanceKm || 5,
         actualDurationMin,
-        rideData.pricing?.surgeMultiplier || 1.0,
+        rideData.surgeMultiplier || rideData.pricing?.surgeMultiplier || 1.0,
         rideData.serviceType || 'KULOOC X'
       );
 

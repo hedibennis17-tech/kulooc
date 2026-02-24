@@ -13,6 +13,7 @@ import {
   addDoc, getDoc, setDoc, Timestamp,
   type Firestore,
 } from 'firebase/firestore';
+import { calculateFare } from '@/lib/services/fare-service';
 
 // ─── Helpers géographiques ────────────────────────────────────────────────────
 function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
@@ -256,6 +257,13 @@ export class DispatchEngine {
         if (reqData.status !== 'offered' && reqData.status !== 'pending') throw new Error('Demande déjà assignée');
         if (reqData.offeredToDriverId && reqData.offeredToDriverId !== driverId) throw new Error('Offre destinée à un autre chauffeur');
 
+        const fare = calculateFare(
+          reqData.estimatedDistanceKm || 5,
+          reqData.estimatedDurationMin || 10,
+          reqData.surgeMultiplier || 1.0,
+          reqData.serviceType || 'KULOOC X'
+        );
+
         const rideRef = doc(collection(this.db, 'active_rides'));
         tx.set(rideRef, {
           requestId,
@@ -268,17 +276,12 @@ export class DispatchEngine {
           pickup: reqData.pickup,
           destination: reqData.destination,
           serviceType: reqData.serviceType,
-          estimatedPrice: reqData.estimatedPrice,
-          estimatedDistanceKm: reqData.estimatedDistanceKm,
-          estimatedDurationMin: reqData.estimatedDurationMin,
-          surgeMultiplier: reqData.surgeMultiplier || 1.0,
+          estimatedPrice: fare.total,
+          estimatedDistanceKm: fare.distanceKm,
+          estimatedDurationMin: fare.durationMin,
+          surgeMultiplier: fare.surgeMultiplier,
           status: 'driver-assigned',
-          pricing: {
-            subtotal: +(reqData.estimatedPrice / 1.14975).toFixed(2),
-            tax: +(reqData.estimatedPrice - reqData.estimatedPrice / 1.14975).toFixed(2),
-            total: reqData.estimatedPrice,
-            surgeMultiplier: reqData.surgeMultiplier || 1.0,
-          },
+          pricing: fare,
           assignedAt: serverTimestamp(),
           updatedAt: serverTimestamp(),
           rideStartedAt: null,

@@ -3,11 +3,11 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useUser } from '@/firebase/provider';
 import { useFirestore } from '@/firebase/provider';
-import { createRideRequest, watchActiveRide, cancelRideRequest } from '@/lib/client/client-service';
+import { createRideRequest, cancelRideRequest } from '@/lib/client/client-service';
 import { subscribeToLiveDrivers, subscribeToPassengerRide, updateClientPresence, type LiveDriver, type LiveActiveRide } from '@/lib/realtime/realtime-service';
+import { calculateFare } from '@/lib/services/fare-service';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import {
   MapPin, Navigation, Car, Clock, DollarSign,
@@ -16,6 +16,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
+import { PlacesAutocomplete, type PlaceResult } from '@/components/kulooc/places-autocomplete';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -58,15 +59,43 @@ const SERVICE_TYPES = [
   },
 ];
 
-const BASE_PRICE = 4.50;
-const PRICE_PER_KM = 1.85;
 const MONTREAL_CENTER = { lat: 45.5019, lng: -73.5674 };
 
-function estimatePrice(serviceMultiplier: number) {
-  const distance = 5 + Math.random() * 7;
-  const duration = Math.round(distance * 3 + Math.random() * 5);
-  const price = (BASE_PRICE + distance * PRICE_PER_KM) * serviceMultiplier * 1.14975;
-  return { price, distance: Math.round(distance * 10) / 10, duration };
+// Map service IDs to fare-service names
+const SERVICE_NAME_MAP: Record<string, string> = {
+  'kulooc_x': 'KULOOC X',
+  'kulooc_comfort': 'KULOOC COMFORT',
+  'kulooc_xl': 'KULOOC XL',
+  'kulooc_green': 'KULOOC X', // Green uses same rates as X
+};
+
+function haversineKm(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLng = ((lng2 - lng1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((lat1 * Math.PI) / 180) *
+    Math.cos((lat2 * Math.PI) / 180) *
+    Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function estimateFromCoords(
+  pickupCoords: { lat: number; lng: number } | null,
+  destCoords: { lat: number; lng: number } | null,
+  serviceId: string
+) {
+  if (!pickupCoords || !destCoords) {
+    return { price: 0, distance: 0, duration: 0 };
+  }
+  // Real distance via haversine, multiply by 1.3 for road factor
+  const straightKm = haversineKm(pickupCoords.lat, pickupCoords.lng, destCoords.lat, destCoords.lng);
+  const distanceKm = Math.max(1, +(straightKm * 1.3).toFixed(1));
+  const durationMin = Math.max(3, Math.round(distanceKm * 2.5));
+  const fareName = SERVICE_NAME_MAP[serviceId] || 'KULOOC X';
+  const fare = calculateFare(distanceKm, durationMin, 1.0, fareName);
+  return { price: fare.total, distance: distanceKm, duration: durationMin };
 }
 
 // ─── Icône voiture SVG pour les marqueurs chauffeurs ─────────────────────────
@@ -218,6 +247,8 @@ export default function ClientHomePage() {
 
   const [pickup, setPickup] = useState('');
   const [destination, setDestination] = useState('');
+  const [pickupCoords, setPickupCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [destCoords, setDestCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [selectedService, setSelectedService] = useState('kulooc_x');
   const [step, setStep] = useState<'search' | 'select' | 'waiting' | 'active'>('search');
   const [activeRide, setActiveRide] = useState<LiveActiveRide | null>(null);
@@ -233,8 +264,13 @@ export default function ClientHomePage() {
   useEffect(() => {
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => setUserPos({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-        () => {} // Fallback silencieux sur Montréal
+        (pos) => {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setUserPos(coords);
+          setPickupCoords(coords);
+          setPickup('Ma position actuelle');
+        },
+        () => {} // Fallback silencieux sur Montreal
       );
     }
   }, []);
@@ -293,42 +329,56 @@ export default function ClientHomePage() {
 
   const handleSearch = () => {
     if (!pickup.trim() || !destination.trim()) {
-      toast({ title: 'Adresses requises', description: 'Entrez un départ et une destination.', variant: 'destructive' });
+      toast({ title: 'Adresses requises', description: 'Entrez un depart et une destination.', variant: 'destructive' });
+      return;
+    }
+    if (!pickupCoords || !destCoords) {
+      toast({ title: 'Adresses non validees', description: 'Selectionnez une adresse dans la liste de suggestions.', variant: 'destructive' });
       return;
     }
     setStep('select');
   };
 
+  const handlePickupSelect = (place: PlaceResult) => {
+    setPickup(place.address);
+    setPickupCoords({ lat: place.latitude, lng: place.longitude });
+  };
+
+  const handleDestSelect = (place: PlaceResult) => {
+    setDestination(place.address);
+    setDestCoords({ lat: place.latitude, lng: place.longitude });
+  };
+
   const handleRequestRide = async () => {
-    if (!user) return;
+    if (!user || !pickupCoords || !destCoords) return;
     setIsLoading(true);
     try {
-      const est = estimatePrice(selectedServiceData.multiplier);
+      const est = estimateFromCoords(pickupCoords, destCoords, selectedService);
       const requestId = await createRideRequest({
         passengerId: user.uid,
         passengerName: user.displayName || user.email?.split('@')[0] || 'Passager',
         passengerPhone: user.phoneNumber || '',
         pickup: {
           address: pickup,
-          latitude: userPos.lat,
-          longitude: userPos.lng,
+          latitude: pickupCoords.lat,
+          longitude: pickupCoords.lng,
         },
         destination: {
           address: destination,
-          latitude: MONTREAL_CENTER.lat + (Math.random() - 0.5) * 0.05,
-          longitude: MONTREAL_CENTER.lng + (Math.random() - 0.5) * 0.05,
+          latitude: destCoords.lat,
+          longitude: destCoords.lng,
         },
-        serviceType: selectedService,
-        estimatedPrice: Math.round(est.price * 100) / 100,
+        serviceType: SERVICE_NAME_MAP[selectedService] || 'KULOOC X',
+        estimatedPrice: est.price,
         estimatedDurationMin: est.duration,
         estimatedDistanceKm: est.distance,
         surgeMultiplier: 1.0,
       });
       setCurrentRequestId(requestId);
       setStep('waiting');
-      toast({ title: '🚗 Course demandée !', description: 'Recherche d\'un chauffeur en cours...' });
+      toast({ title: 'Course demandee !', description: 'Recherche d\'un chauffeur en cours...' });
     } catch (err) {
-      toast({ title: 'Erreur', description: 'Impossible de créer la course.', variant: 'destructive' });
+      toast({ title: 'Erreur', description: 'Impossible de creer la course.', variant: 'destructive' });
     } finally {
       setIsLoading(false);
     }
@@ -340,12 +390,14 @@ export default function ClientHomePage() {
     setCurrentRequestId(null);
     setPickup('');
     setDestination('');
+    setPickupCoords(null);
+    setDestCoords(null);
   };
 
-  const est = estimatePrice(selectedServiceData.multiplier);
+  const est = estimateFromCoords(pickupCoords, destCoords, selectedService);
   const nearbyDrivers = liveDrivers.filter((d) => d.status === 'online').length;
 
-  return (
+  const content = (
     <div className="flex flex-col h-full">
       {/* ── Carte Google Maps ── */}
       <div className="relative h-52 bg-gray-100 overflow-hidden">
@@ -354,6 +406,8 @@ export default function ClientHomePage() {
             apiKey={apiKey}
             drivers={liveDrivers}
             userPos={userPos}
+            pickupPos={pickupCoords}
+            destPos={destCoords}
             activeRide={activeRide}
           />
         ) : (
@@ -384,40 +438,43 @@ export default function ClientHomePage() {
           <div className="space-y-3">
             <h2 className="text-xl font-bold text-gray-900">Où allez-vous ?</h2>
 
-            <div className="relative">
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 bg-black rounded-full" />
-              <Input
-                placeholder="Votre position actuelle"
-                value={pickup}
-                onChange={e => setPickup(e.target.value)}
-                className="pl-8 h-12 border-gray-200 bg-gray-50 text-sm"
-              />
-            </div>
+            <PlacesAutocomplete
+              value={pickup}
+              onChange={setPickup}
+              onPlaceSelect={handlePickupSelect}
+              placeholder="Adresse de depart"
+              icon={<div className="w-3 h-3 bg-black rounded-full" />}
+            />
 
-            <div className="relative">
-              <div className="absolute left-3 top-1/2 -translate-y-1/2 w-3 h-3 bg-red-600 rounded-sm" />
-              <Input
-                placeholder="Entrez votre destination"
-                value={destination}
-                onChange={e => setDestination(e.target.value)}
-                className="pl-8 h-12 border-gray-200 bg-gray-50 text-sm"
-                onKeyDown={e => e.key === 'Enter' && handleSearch()}
-              />
-            </div>
+            <PlacesAutocomplete
+              value={destination}
+              onChange={setDestination}
+              onPlaceSelect={handleDestSelect}
+              placeholder="Entrez votre destination"
+              icon={<div className="w-3 h-3 bg-red-600 rounded-sm" />}
+            />
 
             <div className="space-y-1">
-              {['Aéroport YUL — Dorval, QC', 'Gare Centrale — Montréal, QC', 'Vieux-Montréal, QC', 'Université McGill — Montréal, QC'].map(place => (
+              {[
+                { name: 'Aeroport YUL', sub: 'Dorval, QC', lat: 45.4657, lng: -73.7455 },
+                { name: 'Gare Centrale', sub: 'Montreal, QC', lat: 45.4994, lng: -73.5667 },
+                { name: 'Vieux-Montreal', sub: 'Montreal, QC', lat: 45.5048, lng: -73.5538 },
+                { name: 'Universite McGill', sub: 'Montreal, QC', lat: 45.5048, lng: -73.5772 },
+              ].map(place => (
                 <button
-                  key={place}
-                  onClick={() => setDestination(place)}
+                  key={place.name}
+                  onClick={() => {
+                    setDestination(`${place.name}, ${place.sub}`);
+                    setDestCoords({ lat: place.lat, lng: place.lng });
+                  }}
                   className="w-full flex items-center gap-3 p-3 rounded-lg hover:bg-gray-50 text-left transition-colors"
                 >
                   <div className="w-8 h-8 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
                     <MapPin className="w-4 h-4 text-gray-500" />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-gray-900">{place.split(' — ')[0]}</p>
-                    <p className="text-xs text-gray-400">{place.split(' — ')[1] || 'Montréal, QC'}</p>
+                    <p className="text-sm font-medium text-gray-900">{place.name}</p>
+                    <p className="text-xs text-gray-400">{place.sub}</p>
                   </div>
                   <ChevronRight className="w-4 h-4 text-gray-300 ml-auto" />
                 </button>
@@ -427,7 +484,7 @@ export default function ClientHomePage() {
             <Button
               className="w-full h-12 bg-black hover:bg-gray-800 text-white font-semibold rounded-xl"
               onClick={handleSearch}
-              disabled={!pickup || !destination}
+              disabled={!pickup || !destination || !pickupCoords || !destCoords}
             >
               <Navigation className="w-4 h-4 mr-2" />
               Voir les options
@@ -452,7 +509,7 @@ export default function ClientHomePage() {
 
             <div className="space-y-2">
               {SERVICE_TYPES.map(service => {
-                const e = estimatePrice(service.multiplier);
+                const e = estimateFromCoords(pickupCoords, destCoords, service.id);
                 const isSelected = selectedService === service.id;
                 return (
                   <button
@@ -610,4 +667,15 @@ export default function ClientHomePage() {
       </div>
     </div>
   );
+
+  // Wrap everything in APIProvider so PlacesAutocomplete has access to Places library
+  if (apiKey) {
+    return (
+      <APIProvider apiKey={apiKey} libraries={['places']}>
+        {content}
+      </APIProvider>
+    );
+  }
+
+  return content;
 }

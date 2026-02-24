@@ -10,13 +10,10 @@ import { useRouter } from 'next/navigation';
 import { useUser } from '@/firebase/provider';
 import { db } from '@/firebase';
 import {
-  collection,
   doc,
   setDoc,
+  getDoc,
   serverTimestamp,
-  query,
-  where,
-  getDocs,
 } from 'firebase/firestore';
 import { MapPin, Car, User, FileText, CheckCircle, ChevronRight, ChevronLeft, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -154,23 +151,18 @@ export default function DriverOnboardingPage() {
 
     setIsSubmitting(true);
     try {
-      // Vérifier si le chauffeur existe déjà
-      const existingQuery = query(
-        collection(db, 'drivers'),
-        where('userId', '==', user.uid)
-      );
-      const existingDocs = await getDocs(existingQuery);
+      // Vérifier si le chauffeur existe déjà (utilise user.uid comme doc ID)
+      const driverDocRef = doc(db, 'drivers', user.uid);
+      const existingSnap = await getDoc(driverDocRef);
       
-      if (!existingDocs.empty) {
+      if (existingSnap.exists()) {
         toast({ title: 'Compte existant', description: 'Vous avez déjà un profil chauffeur KULOOC.', variant: 'default' });
         router.push('/driver');
         return;
       }
 
-      // Créer le document chauffeur avec userId = auth.uid (requis par les règles Firestore)
-      const driverDocRef = doc(collection(db, 'drivers'));
+      // Créer le document chauffeur avec user.uid comme ID de document
       await setDoc(driverDocRef, {
-        // Champ requis par les règles Firestore: userId doit correspondre à request.auth.uid
         userId: user.uid,
         
         // Informations personnelles
