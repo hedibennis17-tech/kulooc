@@ -350,6 +350,12 @@ export function useDriver(): UseDriverReturn {
           completedAt: serverTimestamp(),
           finalPrice: finalFare.total,
         }).catch(() => {});
+
+        // Clean up any leftover driver_offers for this request
+        const offerId = `${rideData.requestId}_${user.uid}`;
+        await updateDoc(doc(db, 'driver_offers', offerId), {
+          status: 'accepted',
+        }).catch(() => {});
       }
 
       // 5. Reset driver to online

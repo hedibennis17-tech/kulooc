@@ -46,10 +46,42 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
       where('status', '==', 'pending')
     );
 
-    const unsub = onSnapshot(q, (snap) => {
+    const unsub = onSnapshot(q, async (snap) => {
       if (!snap.empty) {
         const offerDoc = snap.docs[0];
         const offer = { id: offerDoc.id, ...offerDoc.data() } as DriverOffer;
+
+        // Check if the offer has expired based on expiresAt
+        if (offer.expiresAt) {
+          const remaining = Math.floor((offer.expiresAt.toMillis() - Date.now()) / 1000);
+          if (remaining <= 0) {
+            // Offer expired - auto-clean it
+            await updateDoc(doc(db, 'driver_offers', offerDoc.id), { status: 'expired' }).catch(() => {});
+            setCurrentOffer(null);
+            setCountdown(60);
+            if (countdownRef.current) clearInterval(countdownRef.current);
+            return;
+          }
+          setCountdown(remaining);
+        } else {
+          setCountdown(60);
+        }
+
+        // Verify the underlying ride_request is still pending/offered before showing
+        try {
+          const reqSnap = await getDoc(doc(db, 'ride_requests', offer.requestId));
+          if (!reqSnap.exists() || !['pending', 'offered'].includes(reqSnap.data().status)) {
+            // Request is gone or already assigned/completed - clean up the stale offer
+            await updateDoc(doc(db, 'driver_offers', offerDoc.id), { status: 'expired' }).catch(() => {});
+            setCurrentOffer(null);
+            setCountdown(60);
+            if (countdownRef.current) clearInterval(countdownRef.current);
+            return;
+          }
+        } catch (_) {
+          // If we can't verify, still show the offer
+        }
+
         setCurrentOffer(offer);
 
         // Play sound for incoming offer
@@ -58,16 +90,6 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
           audio.volume = 0.7;
           audio.play().catch(() => {});
         } catch (_) {}
-
-        // Calculer le countdown restant
-        if (offer.expiresAt) {
-          const remaining = Math.max(0, Math.floor(
-            (offer.expiresAt.toMillis() - Date.now()) / 1000
-          ));
-          setCountdown(remaining);
-        } else {
-          setCountdown(60);
-        }
       } else {
         setCurrentOffer(null);
         setCountdown(60);
@@ -78,7 +100,7 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
     return () => unsub();
   }, [user?.uid]);
 
-  // Timer countdown
+  // Timer countdown + auto-expire when reaching 0
   useEffect(() => {
     if (!currentOffer) return;
 
@@ -88,6 +110,9 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
       setCountdown((prev) => {
         if (prev <= 1) {
           if (countdownRef.current) clearInterval(countdownRef.current);
+          // Auto-expire the offer when countdown reaches 0
+          updateDoc(doc(db, 'driver_offers', currentOffer.id), { status: 'expired' }).catch(() => {});
+          setCurrentOffer(null);
           return 0;
         }
         return prev - 1;
@@ -101,6 +126,24 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
 
   const acceptOffer = useCallback(async () => {
     if (!currentOffer || !user) return;
+
+    // Guard: don't try to accept if countdown already expired
+    if (countdown <= 0) {
+      await updateDoc(doc(db, 'driver_offers', currentOffer.id), { status: 'expired' }).catch(() => {});
+      setCurrentOffer(null);
+      return;
+    }
+
+    // Guard: verify the ride_request is still valid before calling dispatch
+    try {
+      const reqSnap = await getDoc(doc(db, 'ride_requests', currentOffer.requestId));
+      if (!reqSnap.exists() || !['pending', 'offered'].includes(reqSnap.data().status)) {
+        await updateDoc(doc(db, 'driver_offers', currentOffer.id), { status: 'expired' }).catch(() => {});
+        setCurrentOffer(null);
+        return;
+      }
+    } catch (_) {}
+
     setIsResponding(true);
     try {
       const engine = getDispatchEngine(db);
@@ -112,11 +155,15 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
       );
       if (result.success) {
         setCurrentOffer(null);
+      } else {
+        // If dispatch failed (stale request), clean up the offer
+        await updateDoc(doc(db, 'driver_offers', currentOffer.id), { status: 'expired' }).catch(() => {});
+        setCurrentOffer(null);
       }
     } finally {
       setIsResponding(false);
     }
-  }, [currentOffer, user, currentLocation]);
+  }, [currentOffer, user, currentLocation, countdown]);
 
   const declineOffer = useCallback(async () => {
     if (!currentOffer || !user) return;
