@@ -5,14 +5,14 @@ import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useUser } from '@/firebase/provider';
 import { upsertClientProfile } from '@/lib/client/client-service';
-import { Car, Clock, Wallet, User, MapPin } from 'lucide-react';
+import { Car, Clock, Wallet, User, Home, MessageSquare, Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 const navItems = [
-  { href: '/client', label: 'Course', icon: Car, exact: true },
-  { href: '/client/activity', label: 'Activité', icon: Clock },
+  { href: '/client', label: 'Accueil', icon: Home, exact: true },
+  { href: '/client/activity', label: 'Activite', icon: Clock },
   { href: '/client/wallet', label: 'Portefeuille', icon: Wallet },
-  { href: '/client/account', label: 'Compte', icon: User },
+  { href: '/client/account', label: 'Menu', icon: Menu },
 ];
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
@@ -20,14 +20,17 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   const router = useRouter();
   const { user, isUserLoading } = useUser();
 
-  // Rediriger vers la connexion si non authentifié
-  useEffect(() => {
-    if (!isUserLoading && !user) {
-      router.push('/login?redirect=/client');
-    }
-  }, [user, isUserLoading, router]);
+  // Skip auth check for login & complete-profile pages
+  const isAuthPage = pathname.includes('/login') || pathname.includes('/complete-profile');
 
-  // Créer/mettre à jour le profil Firestore à chaque connexion
+  // Redirect to client login if not authenticated (skip on auth pages)
+  useEffect(() => {
+    if (!isUserLoading && !user && !isAuthPage) {
+      router.push('/client/login');
+    }
+  }, [user, isUserLoading, router, isAuthPage]);
+
+  // Update Firestore profile on login
   useEffect(() => {
     if (user) {
       upsertClientProfile(user.uid, {
@@ -51,6 +54,11 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
     );
   }
 
+  // On auth pages, render children without layout chrome
+  if (isAuthPage) {
+    return <>{children}</>;
+  }
+
   if (!user) return null;
 
   const isActive = (href: string, exact?: boolean) => {
@@ -59,8 +67,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   };
 
   return (
-    <div className="min-h-screen bg-white flex flex-col max-w-md mx-auto relative shadow-2xl">
-      {/* Header */}
+    <div className="min-h-screen bg-background flex flex-col lg:max-w-md mx-auto relative lg:shadow-2xl">
+      {/* Header - black */}
       <header className="bg-black text-white px-4 py-3 flex items-center justify-between sticky top-0 z-40">
         <div className="flex items-center gap-2">
           <div className="w-8 h-8 bg-red-600 rounded-lg flex items-center justify-center">
@@ -79,8 +87,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
         {children}
       </main>
 
-      {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full max-w-md bg-white border-t border-gray-200 z-40">
+      {/* Bottom Navigation - Canadian Red */}
+      <nav className="fixed bottom-0 left-1/2 -translate-x-1/2 w-full lg:max-w-md bg-red-600 z-40">
         <div className="grid grid-cols-4 h-16">
           {navItems.map((item) => {
             const Icon = item.icon;
@@ -90,21 +98,23 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
                 key={item.href}
                 href={item.href}
                 className={cn(
-                  'flex flex-col items-center justify-center gap-0.5 transition-colors',
-                  active ? 'text-red-600' : 'text-gray-400 hover:text-gray-700'
+                  'flex flex-col items-center justify-center gap-0.5 transition-colors relative',
+                  active ? 'text-white' : 'text-white/60 hover:text-white/80'
                 )}
               >
                 <Icon className={cn('w-5 h-5', active && 'fill-current')} />
-                <span className={cn('text-xs font-medium', active && 'font-semibold')}>
+                <span className={cn('text-[10px] font-medium', active && 'font-bold')}>
                   {item.label}
                 </span>
                 {active && (
-                  <div className="absolute bottom-0 w-8 h-0.5 bg-red-600 rounded-t-full" />
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 bg-white rounded-b-full" />
                 )}
               </Link>
             );
           })}
         </div>
+        {/* Safe area for mobile */}
+        <div className="h-safe-area-inset-bottom bg-red-600" />
       </nav>
     </div>
   );
