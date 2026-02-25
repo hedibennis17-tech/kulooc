@@ -4,6 +4,11 @@
  * KULOOC — Hook useRealtime
  * Centralise toutes les données temps réel : chauffeurs, clients, demandes, courses
  * Utilisé par : dispatch, dashboard, client
+ *
+ * IMPORTANT (rapport v2) :
+ *   - autoAssign() et manualAssign() délèguent UNIQUEMENT à engine.directAssign()
+ *   - Plus aucun runTransaction ici — le Dispatch Engine est la source unique de vérité
+ *   - Cela élimine les conflits Firestore causés par 3 systèmes concurrents
  */
 
 import { useState, useEffect, useCallback } from 'react';
@@ -20,15 +25,7 @@ import {
   type LiveRideRequest,
   type LiveActiveRide,
 } from './realtime-service';
-import {
-  doc,
-  updateDoc,
-  addDoc,
-  collection,
-  serverTimestamp,
-  runTransaction,
-  getFirestore as getFS,
-} from 'firebase/firestore';
+import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
 
 export function useRealtime() {
   const [drivers, setDrivers] = useState<LiveDriver[]>([]);
@@ -106,6 +103,8 @@ export function useRealtime() {
   };
 
   // ─── Assignation automatique ───────────────────────────────────────────────
+  // Délègue au Dispatch Engine v2 (source unique de vérité).
+  // Plus de runTransaction direct ici — élimine les conflits Firestore.
   const autoAssign = useCallback(
     async (requestId: string): Promise<{ success: boolean; driverName?: string; error?: string }> => {
       const db = getDb();
@@ -122,59 +121,16 @@ export function useRealtime() {
       setAutoAssigning((prev) => new Set([...prev, requestId]));
 
       try {
-        await runTransaction(db, async (transaction) => {
-          const requestRef = doc(db, 'ride_requests', requestId);
-          const driverRef = doc(db, 'drivers', bestDriver.id);
-
-          const [reqSnap, drvSnap] = await Promise.all([
-            transaction.get(requestRef),
-            transaction.get(driverRef),
-          ]);
-
-          if (!reqSnap.exists() || reqSnap.data().status !== 'pending') {
-            throw new Error('Demande déjà assignée ou annulée');
-          }
-          if (!drvSnap.exists() || drvSnap.data().status !== 'online') {
-            throw new Error('Chauffeur non disponible');
-          }
-
-          const rideRef = doc(collection(db, 'active_rides'));
-
-          transaction.set(rideRef, {
-            requestId,
-            passengerId: request.passengerId,
-            passengerName: request.passengerName,
-            driverId: bestDriver.id,
-            driverName: bestDriver.name,
-            driverLocation: bestDriver.location || null,
-            pickup: request.pickup,
-            destination: request.destination,
-            serviceType: request.serviceType,
-            status: 'driver-assigned',
-            pricing: {
-              subtotal: +(request.estimatedPrice / 1.14975).toFixed(2),
-              tax: +(request.estimatedPrice - request.estimatedPrice / 1.14975).toFixed(2),
-              total: request.estimatedPrice,
-            },
-            assignedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-
-          transaction.update(requestRef, {
-            status: 'driver-assigned',
-            driverId: bestDriver.id,
-            driverName: bestDriver.name,
-            assignedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-
-          transaction.update(driverRef, {
-            status: 'en-route',
-            currentRideId: rideRef.id,
-            updatedAt: serverTimestamp(),
-          });
-        });
-
+        const engine = getDispatchEngine(db);
+        const result = await engine.directAssign(
+          requestId,
+          bestDriver.id,
+          bestDriver.name,
+          bestDriver.location
+            ? { latitude: bestDriver.location.latitude, longitude: bestDriver.location.longitude }
+            : null
+        );
+        if (!result.success) throw new Error(result.error || 'Échec assignation');
         return { success: true, driverName: bestDriver.name };
       } catch (e: any) {
         return { success: false, error: e.message };
@@ -190,62 +146,30 @@ export function useRealtime() {
   );
 
   // ─── Assignation manuelle ──────────────────────────────────────────────────
+  // Délègue au Dispatch Engine v2 via directAssign (bypass de l'offre).
   const manualAssign = useCallback(
     async (requestId: string, driverId: string): Promise<{ success: boolean; error?: string }> => {
       const db = getDb();
       if (!db) return { success: false, error: 'Firebase non disponible' };
 
-      const request = rideRequests.find((r) => r.id === requestId);
       const driver = drivers.find((d) => d.id === driverId);
-      if (!request || !driver) return { success: false, error: 'Données introuvables' };
+      if (!driver) return { success: false, error: 'Chauffeur introuvable' };
 
       try {
-        await runTransaction(db, async (transaction) => {
-          const requestRef = doc(db, 'ride_requests', requestId);
-          const driverRef = doc(db, 'drivers', driverId);
-          const rideRef = doc(collection(db, 'active_rides'));
-
-          transaction.set(rideRef, {
-            requestId,
-            passengerId: request.passengerId,
-            passengerName: request.passengerName,
-            driverId,
-            driverName: driver.name,
-            driverLocation: driver.location || null,
-            pickup: request.pickup,
-            destination: request.destination,
-            serviceType: request.serviceType,
-            status: 'driver-assigned',
-            pricing: {
-              subtotal: +(request.estimatedPrice / 1.14975).toFixed(2),
-              tax: +(request.estimatedPrice - request.estimatedPrice / 1.14975).toFixed(2),
-              total: request.estimatedPrice,
-            },
-            assignedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-
-          transaction.update(requestRef, {
-            status: 'driver-assigned',
-            driverId,
-            driverName: driver.name,
-            assignedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-
-          transaction.update(driverRef, {
-            status: 'en-route',
-            currentRideId: rideRef.id,
-            updatedAt: serverTimestamp(),
-          });
-        });
-
-        return { success: true };
+        const engine = getDispatchEngine(db);
+        return await engine.directAssign(
+          requestId,
+          driverId,
+          driver.name,
+          driver.location
+            ? { latitude: driver.location.latitude, longitude: driver.location.longitude }
+            : null
+        );
       } catch (e: any) {
         return { success: false, error: e.message };
       }
     },
-    [drivers, rideRequests, getDb]
+    [drivers, getDb]
   );
 
   return {
