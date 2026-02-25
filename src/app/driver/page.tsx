@@ -1,11 +1,11 @@
 'use client';
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
 import { Shield, SlidersHorizontal, TrendingUp, Plane, MapPin, Navigation, Star, Phone, ChevronUp, ChevronDown, X, Volume2, ArrowUp, ArrowLeft, ArrowRight, CornerUpLeft, CornerUpRight, RotateCcw } from 'lucide-react';
 import { useUser } from '@/firebase/provider';
 import { useDriver } from '@/lib/firestore/use-driver';
 import { useDriverOffer } from '@/lib/firestore/use-driver-offer';
-import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
+import { APIProvider, Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
 import { useToast } from '@/hooks/use-toast';
 import {
   Sheet,
@@ -27,47 +27,106 @@ function formatMoney(amount: number): string {
   return amount.toFixed(2) + ' $';
 }
 
-function openNavigation(latitude: number, longitude: number, address?: string) {
-  const encoded = address ? encodeURIComponent(address) : `${latitude},${longitude}`;
-  const url = `https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`;
-  window.open(url, '_blank');
+// In-app route directions state (rendered on the embedded map)
+interface DirectionsState {
+  route: google.maps.DirectionsResult | null;
+  steps: google.maps.DirectionsStep[];
+  currentStepIndex: number;
+  totalDistanceM: number;
+  totalDurationS: number;
+  isActive: boolean;
 }
 
-// Compact Turn-by-Turn Navigation Bar (Uber-inspired)
-function NavigationBar({ 
-  destination, 
-  distanceKm, 
-  durationMin, 
-  onHide, 
-  isVisible 
-}: { 
-  destination: string; 
-  distanceKm?: number; 
-  durationMin?: number; 
-  onHide: () => void; 
+// Render directions polyline on the Google Map using vis.gl useMap
+function DirectionsRendererComponent({ route }: { route: google.maps.DirectionsResult }) {
+  const map = useMap();
+  const rendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+
+  useEffect(() => {
+    if (!map || !route) return;
+
+    if (!rendererRef.current) {
+      rendererRef.current = new google.maps.DirectionsRenderer({
+        suppressMarkers: true,
+        polylineOptions: {
+          strokeColor: '#DC2626', // Red route
+          strokeWeight: 5,
+          strokeOpacity: 0.9,
+        },
+      });
+    }
+    rendererRef.current.setMap(map);
+    rendererRef.current.setDirections(route);
+
+    return () => {
+      if (rendererRef.current) {
+        rendererRef.current.setMap(null);
+      }
+    };
+  }, [map, route]);
+
+  return null;
+}
+
+// Parse maneuver to icon
+function getStepIcon(maneuver?: string) {
+  if (!maneuver) return <ArrowUp className="w-7 h-7 text-white" />;
+  if (maneuver.includes('left') && maneuver.includes('turn')) return <CornerUpLeft className="w-7 h-7 text-white" />;
+  if (maneuver.includes('right') && maneuver.includes('turn')) return <CornerUpRight className="w-7 h-7 text-white" />;
+  if (maneuver.includes('uturn') || maneuver.includes('u-turn')) return <RotateCcw className="w-7 h-7 text-white" />;
+  if (maneuver.includes('left')) return <ArrowLeft className="w-7 h-7 text-white" />;
+  if (maneuver.includes('right')) return <ArrowRight className="w-7 h-7 text-white" />;
+  return <ArrowUp className="w-7 h-7 text-white" />;
+}
+
+// Strip HTML tags from directions instructions
+function stripHtml(html: string) {
+  return html.replace(/<[^>]*>/g, '');
+}
+
+// Compact Turn-by-Turn Navigation Bar (Uber-inspired) -- now with real directions data
+function NavigationBar({
+  destination,
+  distanceKm,
+  durationMin,
+  steps,
+  currentStepIndex,
+  onHide,
+  isVisible
+}: {
+  destination: string;
+  distanceKm?: number;
+  durationMin?: number;
+  steps: google.maps.DirectionsStep[];
+  currentStepIndex: number;
+  onHide: () => void;
   isVisible: boolean;
 }) {
   if (!isVisible) return null;
 
+  const currentStep = steps[currentStepIndex];
+  const instruction = currentStep ? stripHtml(currentStep.instructions) : 'Continuez tout droit';
+  const stepDistance = currentStep?.distance?.text || '';
+  const maneuver = currentStep?.maneuver;
+
   return (
     <div className="absolute top-0 left-0 right-0 z-30">
-      {/* Compact nav instruction bar - dark with red accent */}
+      {/* Compact nav instruction bar */}
       <div className="bg-red-700 text-white px-4 pt-10 pb-3">
         <div className="flex items-center gap-3">
-          {/* Direction icon */}
           <div className="flex-shrink-0">
-            <ArrowUp className="w-8 h-8 text-white" />
+            {getStepIcon(maneuver)}
           </div>
-          {/* Instruction */}
           <div className="flex-1 min-w-0">
-            <p className="font-bold text-sm truncate">
-              Continuez tout droit
-            </p>
-            <p className="text-white/70 text-xs">200 m</p>
+            <p className="font-bold text-sm leading-tight">{instruction}</p>
+            <p className="text-white/70 text-xs mt-0.5">{stepDistance}</p>
           </div>
-          {/* Audio button */}
-          <button className="p-2 hover:bg-white/10 rounded-full transition-colors flex-shrink-0">
-            <Volume2 className="w-4 h-4" />
+          <button
+            onClick={onHide}
+            className="p-2 hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
+            title="Masquer la navigation"
+          >
+            <X className="w-4 h-4" />
           </button>
         </div>
       </div>
@@ -83,13 +142,6 @@ function NavigationBar({
           </span>
         </div>
         <p className="text-xs text-white/80 truncate max-w-[50%] text-right">{destination}</p>
-        <button
-          onClick={onHide}
-          className="ml-2 p-1.5 bg-white/10 rounded-full hover:bg-white/20 transition-colors flex-shrink-0"
-          title="Masquer la navigation"
-        >
-          <X className="w-3.5 h-3.5" />
-        </button>
       </div>
     </div>
   );
@@ -287,6 +339,11 @@ export default function DriverHomePage() {
   const [navBarVisible, setNavBarVisible] = useState(true);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
   const rideTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const [directions, setDirections] = useState<DirectionsState>({
+    route: null, steps: [], currentStepIndex: 0,
+    totalDistanceM: 0, totalDurationS: 0, isActive: false,
+  });
+  const directionsServiceRef = useRef<google.maps.DirectionsService | null>(null);
   const {
     isOnline, activeRide, isLoading, onlineDuration, earningsToday, ridesCompleted,
     currentLocation, goOnline, goOffline, arrivedAtPickup, startRide, completeRide,
@@ -309,11 +366,14 @@ export default function DriverHomePage() {
     return () => { if (rideTimerRef.current) clearInterval(rideTimerRef.current); };
   }, [activeRide?.status]);
 
-  // Show nav bar when ride starts
+  // Show nav bar when ride starts, clear directions when ride ends
   useEffect(() => {
     if (activeRide) {
       setNavBarVisible(true);
       setPanelCollapsed(false);
+    } else {
+      // Reset directions when no active ride
+      setDirections({ route: null, steps: [], currentStepIndex: 0, totalDistanceM: 0, totalDurationS: 0, isActive: false });
     }
   }, [activeRide?.id]);
 
@@ -336,10 +396,86 @@ export default function DriverHomePage() {
     toast({ title: 'Course refusee.' });
   };
 
-  const handleNavigate = () => {
-    const target = activeRide?.status === 'in-progress' ? activeRide?.destination : activeRide?.pickup;
+  // Fetch directions from Google Maps Directions API (in-app, not external)
+  const fetchDirections = useCallback((
+    origin: { lat: number; lng: number },
+    dest: { lat: number; lng: number }
+  ) => {
+    if (!window.google?.maps) return;
+    if (!directionsServiceRef.current) {
+      directionsServiceRef.current = new google.maps.DirectionsService();
+    }
+    directionsServiceRef.current.route(
+      {
+        origin: new google.maps.LatLng(origin.lat, origin.lng),
+        destination: new google.maps.LatLng(dest.lat, dest.lng),
+        travelMode: google.maps.TravelMode.DRIVING,
+      },
+      (result, status) => {
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          const leg = result.routes[0]?.legs[0];
+          setDirections({
+            route: result,
+            steps: leg?.steps || [],
+            currentStepIndex: 0,
+            totalDistanceM: leg?.distance?.value || 0,
+            totalDurationS: leg?.duration?.value || 0,
+            isActive: true,
+          });
+          setNavBarVisible(true);
+        }
+      }
+    );
+  }, []);
+
+  // Auto-fetch directions when active ride changes
+  useEffect(() => {
+    if (!activeRide || !currentLocation) return;
+    const target = activeRide.status === 'in-progress' ? activeRide.destination : activeRide.pickup;
     if (target?.latitude && target?.longitude) {
-      openNavigation(target.latitude, target.longitude, target.address);
+      fetchDirections(
+        { lat: currentLocation.latitude, lng: currentLocation.longitude },
+        { lat: target.latitude, lng: target.longitude }
+      );
+    }
+  }, [activeRide?.id, activeRide?.status, currentLocation?.latitude, currentLocation?.longitude, fetchDirections]);
+
+  // Update current step based on driver location
+  useEffect(() => {
+    if (!directions.isActive || !currentLocation || directions.steps.length === 0) return;
+
+    const driverLat = currentLocation.latitude;
+    const driverLng = currentLocation.longitude;
+
+    // Find the closest step to the driver's current position
+    let closestIdx = directions.currentStepIndex;
+    let minDist = Infinity;
+
+    for (let i = directions.currentStepIndex; i < directions.steps.length; i++) {
+      const step = directions.steps[i];
+      const endLat = step.end_location.lat();
+      const endLng = step.end_location.lng();
+      const dist = Math.sqrt(Math.pow(driverLat - endLat, 2) + Math.pow(driverLng - endLng, 2));
+      if (dist < minDist) {
+        minDist = dist;
+        closestIdx = i;
+      }
+    }
+
+    // If driver has passed the current step endpoint (within ~50m), advance
+    if (closestIdx > directions.currentStepIndex) {
+      setDirections(prev => ({ ...prev, currentStepIndex: closestIdx }));
+    }
+  }, [currentLocation, directions.isActive, directions.steps, directions.currentStepIndex]);
+
+  const handleNavigate = () => {
+    if (!currentLocation || !activeRide) return;
+    const target = activeRide.status === 'in-progress' ? activeRide.destination : activeRide.pickup;
+    if (target?.latitude && target?.longitude) {
+      fetchDirections(
+        { lat: currentLocation.latitude, lng: currentLocation.longitude },
+        { lat: target.latitude, lng: target.longitude }
+      );
     }
   };
 
@@ -413,6 +549,9 @@ export default function DriverHomePage() {
                   </div>
                 </AdvancedMarker>
               )}
+
+              {/* In-app directions route (red polyline) */}
+              {directions.route && <DirectionsRendererComponent route={directions.route} />}
             </Map>
           </APIProvider>
         ) : (
@@ -422,7 +561,7 @@ export default function DriverHomePage() {
         )}
       </div>
 
-      {/* Turn-by-turn Navigation Bar (on active ride) */}
+      {/* Turn-by-turn Navigation Bar (on active ride, with real directions) */}
       {activeRide && (
         <NavigationBar
           destination={
@@ -430,12 +569,16 @@ export default function DriverHomePage() {
               ? (activeRide.destination?.address || 'Destination')
               : (activeRide.pickup?.address || 'Point de prise en charge')
           }
-          distanceKm={activeRide.estimatedDistanceKm || activeRide.pricing?.distanceKm}
-          durationMin={activeRide.estimatedDurationMin || activeRide.pricing?.durationMin}
+          distanceKm={directions.totalDistanceM > 0 ? directions.totalDistanceM / 1000 : (activeRide.estimatedDistanceKm || activeRide.pricing?.distanceKm)}
+          durationMin={directions.totalDurationS > 0 ? directions.totalDurationS / 60 : (activeRide.estimatedDurationMin || activeRide.pricing?.durationMin)}
+          steps={directions.steps}
+          currentStepIndex={directions.currentStepIndex}
           onHide={() => setNavBarVisible(false)}
           isVisible={navBarVisible}
         />
       )}
+
+      {/* DirectionsRenderer is rendered inside Map component below */}
 
       {/* Show nav bar button when hidden */}
       {activeRide && !navBarVisible && (
