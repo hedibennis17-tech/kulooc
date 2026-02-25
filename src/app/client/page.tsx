@@ -11,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import {
   MapPin, Navigation, Car, Clock, DollarSign,
   Star, ChevronRight, X, Loader2, CheckCircle,
-  Shield, Phone, User, AlertCircle
+  Shield, Phone, User, AlertCircle, Users, Package
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
@@ -26,24 +26,33 @@ const SERVICE_TYPES = [
     id: 'KULOOC X',
     name: 'KULOOC X',
     description: 'Berline standard · 4 passagers',
+    shortDesc: 'Économique, rapide et fiable',
     icon: <Car className="w-5 h-5" />,
+    desktopIcon: '/icons/car-x.svg',
     eta: '3-5 min',
+    capacity: 4,
     color: 'bg-gray-900',
   },
   {
     id: 'KULOOC XL',
     name: 'KULOOC XL',
     description: 'SUV/Minivan · 6 passagers',
+    shortDesc: 'Plus d\'espace pour votre groupe',
     icon: <Shield className="w-5 h-5" />,
+    desktopIcon: '/icons/car-xl.svg',
     eta: '6-10 min',
+    capacity: 6,
     color: 'bg-purple-900',
   },
   {
     id: 'KULOOC CONFORT',
     name: 'KULOOC CONFORT',
     description: 'Berline premium · confort',
+    shortDesc: 'Confort et discrétion garantis',
     icon: <Star className="w-5 h-5" />,
+    desktopIcon: '/icons/car-confort.svg',
     eta: '5-8 min',
+    capacity: 4,
     color: 'bg-blue-900',
   },
 ];
@@ -91,11 +100,12 @@ function CarMarker({ status, vehicleType }: { status: string; vehicleType?: stri
 
 // ─── Carte Google Maps ────────────────────────────────────────────────────────
 
-function ClientMapView({ apiKey, drivers, userPos, activeRide }: {
+function ClientMapView({ apiKey, drivers, userPos, activeRide, className }: {
   apiKey: string;
   drivers: LiveDriver[];
   userPos: { lat: number; lng: number };
   activeRide?: LiveActiveRide | null;
+  className?: string;
 }) {
   return (
     <APIProvider apiKey={apiKey}>
@@ -107,7 +117,7 @@ function ClientMapView({ apiKey, drivers, userPos, activeRide }: {
         disableDefaultUI={true}
         zoomControl={true}
         gestureHandling="greedy"
-        className="w-full h-full"
+        className={cn('w-full h-full', className)}
       >
         <AdvancedMarker position={userPos} title="Votre position">
           <div className="relative flex items-center justify-center">
@@ -348,9 +358,12 @@ export default function ClientHomePage() {
   const est = estimatePrice(selectedService);
   const nearbyDrivers = liveDrivers.filter(d => d.status === 'online').length;
 
-  return (
-    <div className="flex flex-col h-full">
-      {/* ── Carte ── */}
+  // ════════════════════════════════════════════════════════════════════════════
+  // VERSION MOBILE (< md) — identique à l'original, inchangée
+  // ════════════════════════════════════════════════════════════════════════════
+  const MobileView = () => (
+    <div className="flex flex-col h-full md:hidden">
+      {/* Carte */}
       <div className="relative h-52 bg-gray-100 overflow-hidden flex-shrink-0">
         {apiKey ? (
           <ClientMapView apiKey={apiKey} drivers={liveDrivers} userPos={userPos} activeRide={activeRide} />
@@ -368,14 +381,13 @@ export default function ClientHomePage() {
         <div className="absolute bottom-0 left-0 right-0 h-8 bg-gradient-to-t from-white to-transparent pointer-events-none" />
       </div>
 
-      {/* ── Contenu ── */}
+      {/* Contenu */}
       <div className="flex-1 bg-white px-4 pt-3 pb-4 overflow-y-auto">
 
-        {/* ── ÉTAPE 1 : Recherche ── */}
+        {/* ÉTAPE 1 : Recherche */}
         {step === 'search' && (
           <div className="space-y-3">
             <h2 className="text-xl font-bold text-gray-900">Où allez-vous ?</h2>
-
             <AddressInput
               value={pickup}
               onChange={setPickup}
@@ -385,12 +397,8 @@ export default function ClientHomePage() {
               isSearching={isSearchingPickup}
               onFocus={() => setIsPickupActive(true)}
               onBlur={() => setTimeout(() => { setIsPickupActive(false); setPickupSuggestions([]); }, 200)}
-              onSelect={s => {
-                setPickup(s.description);
-                setPickupSuggestions([]);
-              }}
+              onSelect={s => { setPickup(s.description); setPickupSuggestions([]); }}
             />
-
             <AddressInput
               value={destination}
               onChange={setDestination}
@@ -400,13 +408,8 @@ export default function ClientHomePage() {
               isSearching={isSearchingDest}
               onFocus={() => setIsDestActive(true)}
               onBlur={() => setTimeout(() => { setIsDestActive(false); setDestSuggestions([]); }, 200)}
-              onSelect={s => {
-                setDestination(s.description);
-                setDestSuggestions([]);
-              }}
+              onSelect={s => { setDestination(s.description); setDestSuggestions([]); }}
             />
-
-            {/* Destinations rapides */}
             <div className="space-y-1">
               {[
                 { label: 'Aéroport YUL', sub: 'Dorval, QC' },
@@ -430,7 +433,6 @@ export default function ClientHomePage() {
                 </button>
               ))}
             </div>
-
             <Button
               className="w-full h-12 bg-black hover:bg-gray-800 text-white font-semibold rounded-xl"
               onClick={handleSearch}
@@ -442,7 +444,7 @@ export default function ClientHomePage() {
           </div>
         )}
 
-        {/* ── ÉTAPE 2 : Sélection du service ── */}
+        {/* ÉTAPE 2 : Sélection */}
         {step === 'select' && (
           <div className="space-y-3">
             <div className="flex items-center gap-2 mb-1">
@@ -502,7 +504,7 @@ export default function ClientHomePage() {
           </div>
         )}
 
-        {/* ── ÉTAPE 3 : En attente ── */}
+        {/* ÉTAPE 3 : En attente */}
         {step === 'waiting' && (
           <div className="space-y-4 py-4">
             <div className="text-center">
@@ -537,7 +539,7 @@ export default function ClientHomePage() {
           </div>
         )}
 
-        {/* ── ÉTAPE 4 : Course active ── */}
+        {/* ÉTAPE 4 : Course active */}
         {step === 'active' && activeRide && (
           <div className="space-y-4 py-2">
             <div className="flex items-center gap-3 bg-green-50 rounded-xl p-3">
@@ -595,5 +597,319 @@ export default function ClientHomePage() {
         )}
       </div>
     </div>
+  );
+
+  // ════════════════════════════════════════════════════════════════════════════
+  // VERSION DESKTOP (≥ md) — Layout 3 colonnes style Uber
+  // Colonne gauche : formulaire adresses + options
+  // Colonne centre : liste des services (visible après saisie des adresses)
+  // Colonne droite : carte Google Maps plein écran
+  // ════════════════════════════════════════════════════════════════════════════
+  const DesktopView = () => (
+    <div className="hidden md:flex h-full w-full overflow-hidden">
+
+      {/* ── Colonne gauche : Commander une course ── */}
+      <div className="w-80 flex-shrink-0 bg-white border-r border-gray-100 flex flex-col overflow-y-auto z-10 shadow-sm">
+        <div className="p-5 border-b border-gray-100">
+          <h2 className="text-base font-semibold text-gray-900">Commander une course</h2>
+        </div>
+
+        <div className="p-4 space-y-3 flex-1">
+          {/* Champ départ */}
+          <div className="relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
+              <div className="w-3 h-3 bg-black rounded-full" />
+            </div>
+            <Input
+              placeholder="Votre position actuelle"
+              value={pickup}
+              onChange={e => setPickup(e.target.value)}
+              onFocus={() => setIsPickupActive(true)}
+              onBlur={() => setTimeout(() => { setIsPickupActive(false); setPickupSuggestions([]); }, 200)}
+              autoComplete="off"
+              className="pl-9 h-11 border-gray-200 bg-gray-50 text-sm"
+            />
+            {isSearchingPickup && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />}
+            {pickupSuggestions.length > 0 && (
+              <div className="absolute top-full mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg z-50 max-h-48 overflow-y-auto">
+                {pickupSuggestions.map(s => (
+                  <button key={s.place_id} onMouseDown={() => { setPickup(s.description); setPickupSuggestions([]); }}
+                    className="w-full flex items-start gap-3 px-4 py-2.5 hover:bg-gray-50 text-left">
+                    <MapPin className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{s.structured_formatting.main_text}</p>
+                      <p className="text-xs text-gray-400">{s.structured_formatting.secondary_text}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Champ destination */}
+          <div className="relative">
+            <div className="absolute left-3 top-1/2 -translate-y-1/2 z-10">
+              <div className="w-3 h-3 bg-red-600 rounded-sm" />
+            </div>
+            <Input
+              placeholder="Entrez votre destination"
+              value={destination}
+              onChange={e => setDestination(e.target.value)}
+              onFocus={() => setIsDestActive(true)}
+              onBlur={() => setTimeout(() => { setIsDestActive(false); setDestSuggestions([]); }, 200)}
+              autoComplete="off"
+              className="pl-9 h-11 border-gray-200 bg-gray-50 text-sm"
+            />
+            {isSearchingDest && <Loader2 className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 animate-spin text-gray-400" />}
+            {destSuggestions.length > 0 && (
+              <div className="absolute top-full mt-1 w-full bg-white border border-gray-200 rounded-xl shadow-lg z-50 max-h-48 overflow-y-auto">
+                {destSuggestions.map(s => (
+                  <button key={s.place_id} onMouseDown={() => { setDestination(s.description); setDestSuggestions([]); }}
+                    className="w-full flex items-start gap-3 px-4 py-2.5 hover:bg-gray-50 text-left">
+                    <MapPin className="w-4 h-4 text-gray-400 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <p className="text-sm font-medium text-gray-900">{s.structured_formatting.main_text}</p>
+                      <p className="text-xs text-gray-400">{s.structured_formatting.secondary_text}</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Options : Prise en charge + Pour moi */}
+          <div className="flex gap-2">
+            <button className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 transition-colors">
+              <Clock className="w-3.5 h-3.5" />
+              Prise en charge immédiate
+              <ChevronRight className="w-3 h-3 text-gray-400" />
+            </button>
+            <button className="flex items-center gap-1.5 px-3 py-2 rounded-full border border-gray-200 text-xs text-gray-700 hover:bg-gray-50 transition-colors">
+              <User className="w-3.5 h-3.5" />
+              Pour moi
+              <ChevronRight className="w-3 h-3 text-gray-400" />
+            </button>
+          </div>
+
+          {/* Destinations rapides (seulement si pas encore de destination) */}
+          {!destination && step === 'search' && (
+            <div className="space-y-0.5 pt-1">
+              {[
+                { label: 'Aéroport YUL', sub: 'Dorval, QC' },
+                { label: 'Gare Centrale', sub: 'Montréal, QC' },
+                { label: 'Vieux-Montréal', sub: 'Montréal, QC' },
+                { label: 'Université McGill', sub: 'Montréal, QC' },
+              ].map(place => (
+                <button
+                  key={place.label}
+                  onClick={() => setDestination(`${place.label}, ${place.sub}`)}
+                  className="w-full flex items-center gap-3 px-2 py-2.5 rounded-lg hover:bg-gray-50 text-left transition-colors"
+                >
+                  <div className="w-7 h-7 bg-gray-100 rounded-full flex items-center justify-center flex-shrink-0">
+                    <MapPin className="w-3.5 h-3.5 text-gray-500" />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-gray-900">{place.label}</p>
+                    <p className="text-xs text-gray-400">{place.sub}</p>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-gray-300 flex-shrink-0" />
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Statut course active (desktop) */}
+          {step === 'active' && activeRide && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-3 bg-green-50 rounded-xl p-3">
+                <div className="w-9 h-9 bg-green-100 rounded-full flex items-center justify-center">
+                  <Car className="w-4 h-4 text-green-600" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-semibold text-green-800 text-sm">
+                    {activeRide.status === 'driver-assigned' && 'Chauffeur en route'}
+                    {activeRide.status === 'driver-arrived' && 'Chauffeur arrivé !'}
+                    {activeRide.status === 'in-progress' && 'Course en cours'}
+                  </p>
+                  <p className="text-green-600 text-xs">{activeRide.driverName}</p>
+                </div>
+                <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              </div>
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 bg-gray-100 rounded-full flex items-center justify-center">
+                  <User className="w-5 h-5 text-gray-500" />
+                </div>
+                <div className="flex-1">
+                  <p className="font-bold text-gray-900 text-sm">{activeRide.driverName}</p>
+                  <div className="flex items-center gap-1 text-xs text-gray-400">
+                    <Star className="w-3 h-3 text-yellow-400 fill-current" />
+                    <span>4.9 · {activeRide.serviceType}</span>
+                  </div>
+                </div>
+                <button className="w-9 h-9 bg-black rounded-full flex items-center justify-center">
+                  <Phone className="w-3.5 h-3.5 text-white" />
+                </button>
+              </div>
+              {activeRide.pricing && (
+                <div className="flex items-center justify-between bg-gray-50 rounded-xl p-3">
+                  <span className="text-sm text-gray-500">Tarif estimé</span>
+                  <span className="font-bold text-gray-900">${activeRide.pricing.total?.toFixed(2)} $CA</span>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Statut en attente (desktop) */}
+          {step === 'waiting' && (
+            <div className="space-y-3 pt-2">
+              <div className="flex items-center gap-3 bg-gray-50 rounded-xl p-3">
+                <div className="w-9 h-9 flex items-center justify-center">
+                  <div className="w-7 h-7 border-3 border-red-600 border-t-transparent rounded-full animate-spin" />
+                </div>
+                <div>
+                  <p className="font-semibold text-gray-900 text-sm">Recherche en cours…</p>
+                  <p className="text-gray-400 text-xs">{selectedServiceData.name} · ${est.price.toFixed(2)} $CA</p>
+                </div>
+              </div>
+              <Button variant="outline" className="w-full h-10 border-red-200 text-red-600 hover:bg-red-50 text-sm" onClick={handleCancel}>
+                <X className="w-4 h-4 mr-2" />
+                Annuler
+              </Button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── Colonne centre : Choisissez une course ── */}
+      {(step === 'select' || step === 'search') && pickup && destination && (
+        <div className="w-96 flex-shrink-0 bg-white border-r border-gray-100 flex flex-col overflow-y-auto z-10">
+          <div className="p-6 pb-3">
+            <h2 className="text-2xl font-bold text-gray-900 mb-1">Choisissez une course</h2>
+            <p className="text-sm text-gray-500">Les courses que vous pourriez apprécier</p>
+          </div>
+
+          {/* Liste des services */}
+          <div className="px-4 space-y-2 flex-1">
+            {SERVICE_TYPES.map(service => {
+              const e = estimatePrice(service.id);
+              const isSelected = selectedService === service.id;
+              const etaTime = service.eta.split('-')[0];
+              const now = new Date();
+              const etaDate = new Date(now.getTime() + parseInt(etaTime) * 60000);
+              const etaStr = etaDate.toLocaleTimeString('fr-CA', { hour: '2-digit', minute: '2-digit' });
+
+              return (
+                <button
+                  key={service.id}
+                  onClick={() => { setSelectedService(service.id); setStep('select'); }}
+                  className={cn(
+                    'w-full flex items-center gap-4 p-4 rounded-xl border-2 transition-all text-left',
+                    isSelected ? 'border-black bg-white shadow-sm' : 'border-gray-100 bg-white hover:border-gray-200'
+                  )}
+                >
+                  {/* Icône voiture SVG */}
+                  <div className="w-16 h-12 flex-shrink-0 flex items-center justify-center">
+                    <svg viewBox="0 0 80 50" className="w-full h-full" fill="none">
+                      <path d="M10 28 L16 14 L64 14 L70 28 L76 30 L76 40 L4 40 L4 30 Z" fill={isSelected ? '#111' : '#555'} />
+                      <path d="M18 14 L20 28 L60 28 L62 14 Z" fill="white" opacity="0.35" />
+                      <circle cx="18" cy="42" r="7" fill="#222" stroke="white" strokeWidth="2" />
+                      <circle cx="62" cy="42" r="7" fill="#222" stroke="white" strokeWidth="2" />
+                      {service.id === 'KULOOC XL' && (
+                        <text x="40" y="36" textAnchor="middle" fill="white" fontSize="8" fontWeight="bold">XL</text>
+                      )}
+                      {service.id === 'KULOOC CONFORT' && (
+                        <path d="M35 20 L40 15 L45 20" stroke="white" strokeWidth="1.5" fill="none" opacity="0.7" />
+                      )}
+                    </svg>
+                  </div>
+
+                  {/* Infos */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <p className="font-bold text-gray-900 text-base">{service.name}</p>
+                      <Users className="w-3.5 h-3.5 text-gray-500" />
+                      <span className="text-xs text-gray-500">{service.capacity}</span>
+                    </div>
+                    <p className="text-xs text-gray-500">
+                      Dans {etaTime} mins · {etaStr}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">{service.shortDesc}</p>
+                  </div>
+
+                  {/* Prix */}
+                  <div className="text-right flex-shrink-0">
+                    <p className="font-bold text-gray-900 text-base">{e.price.toFixed(2)} $CA</p>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Barre de confirmation */}
+          <div className="p-4 border-t border-gray-100 bg-white">
+            <div className="flex items-center gap-3">
+              {/* Paiement fictif */}
+              <div className="flex items-center gap-2 flex-1 px-3 py-2 border border-gray-200 rounded-lg">
+                <div className="w-8 h-5 bg-blue-600 rounded flex items-center justify-center">
+                  <span className="text-white text-xs font-bold">V</span>
+                </div>
+                <span className="text-sm text-gray-700">Visa ••••7673</span>
+                <ChevronRight className="w-4 h-4 text-gray-400 ml-auto" />
+              </div>
+              <Button
+                className="flex-1 h-11 bg-black hover:bg-gray-800 text-white font-semibold rounded-xl text-sm"
+                onClick={handleRequestRide}
+                disabled={isLoading || !pickup || !destination}
+              >
+                {isLoading ? <Loader2 className="w-4 h-4 animate-spin mr-2" /> : null}
+                Commander {selectedServiceData.name}
+              </Button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Colonne droite : Carte ── */}
+      <div className="flex-1 relative bg-gray-100">
+        {apiKey ? (
+          <ClientMapView apiKey={apiKey} drivers={liveDrivers} userPos={userPos} activeRide={activeRide} />
+        ) : (
+          <div className="flex items-center justify-center h-full bg-gray-100">
+            <MapPin className="w-12 h-12 text-red-600" />
+          </div>
+        )}
+
+        {/* Badge chauffeurs disponibles */}
+        {nearbyDrivers > 0 && (
+          <div className="absolute top-4 left-4 bg-white/95 backdrop-blur-sm rounded-full px-3 py-1.5 shadow text-xs font-medium text-green-700 flex items-center gap-1.5">
+            <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+            {nearbyDrivers} chauffeur{nearbyDrivers > 1 ? 's' : ''} disponible{nearbyDrivers > 1 ? 's' : ''}
+          </div>
+        )}
+
+        {/* Callout pickup/destination sur la carte */}
+        {pickup && destination && (
+          <div className="absolute top-4 right-4 bg-white rounded-xl shadow-lg p-3 max-w-xs">
+            <div className="space-y-1.5">
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-2.5 h-2.5 bg-black rounded-full flex-shrink-0" />
+                <span className="text-gray-700 truncate font-medium">{pickup}</span>
+              </div>
+              <div className="flex items-center gap-2 text-xs">
+                <div className="w-2.5 h-2.5 bg-red-600 rounded-sm flex-shrink-0" />
+                <span className="text-gray-700 truncate font-medium">{destination}</span>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      <MobileView />
+      <DesktopView />
+    </>
   );
 }
