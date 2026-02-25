@@ -760,10 +760,10 @@ export default function ClientHomePage() {
   // VERSION DESKTOP (≥ md) — Layout 3 colonnes style Uber
   // ════════════════════════════════════════════════════════════════════════════
   const DesktopView = () => (
-    <div className="hidden md:flex h-full w-full overflow-hidden">
+    <div className="hidden md:flex w-full overflow-hidden" style={{ height: 'calc(100vh - 56px)' }}>
 
       {/* ── Colonne gauche : Commander une course ── */}
-      <div className="w-80 flex-shrink-0 bg-white border-r border-gray-100 flex flex-col overflow-y-auto z-10 shadow-sm">
+      <div className="w-96 flex-shrink-0 bg-white border-r border-gray-100 flex flex-col overflow-y-auto z-10 shadow-sm">
         <div className="p-5 border-b border-gray-100">
           <h2 className="text-base font-semibold text-gray-900">Commander une course</h2>
         </div>
@@ -976,7 +976,7 @@ export default function ClientHomePage() {
       )}
 
       {/* ── Colonne droite : Carte ── */}
-      <div className="flex-1 relative bg-gray-100">
+      <div className="flex-1 relative bg-gray-100 h-full">
         {apiKey ? (
           <ClientMapView apiKey={apiKey} drivers={liveDrivers} userPos={userPos} activeRide={activeRide} liveDriverLocation={liveDriverLocation} />
         ) : (
