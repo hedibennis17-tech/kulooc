@@ -5,6 +5,7 @@ import { useUser } from '@/firebase/provider';
 import { useFirestore } from '@/firebase/provider';
 import { createRideRequest, cancelRideRequest } from '@/lib/client/client-service';
 import { subscribeToLiveDrivers, subscribeToPassengerRide, updateClientPresence, type LiveDriver, type LiveActiveRide } from '@/lib/realtime/realtime-service';
+import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
 import { calculateFare } from '@/lib/services/fare-service';
 import { useToast } from '@/hooks/use-toast';
 import { Button } from '@/components/ui/button';
@@ -281,6 +282,13 @@ export default function ClientHomePage() {
       updateClientPresence(db, user.uid).catch(() => {});
     }
   }, [user, db]);
+
+  // ─── Start dispatch engine (singleton, safe to call multiple times) ──────────
+  useEffect(() => {
+    if (!db) return;
+    const engine = getDispatchEngine(db);
+    engine.start();
+  }, [db]);
 
   // ─── Chauffeurs en temps réel ────────────────────────────────────────────────
   useEffect(() => {

@@ -5,6 +5,8 @@ import { Shield, SlidersHorizontal, TrendingUp, Plane, MapPin, Navigation, Star,
 import { useUser } from '@/firebase/provider';
 import { useDriver } from '@/lib/firestore/use-driver';
 import { useDriverOffer } from '@/lib/firestore/use-driver-offer';
+import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
+import { db } from '@/firebase';
 import { APIProvider, Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
 import { useToast } from '@/hooks/use-toast';
 import {
@@ -351,20 +353,17 @@ export default function DriverHomePage() {
 
   const {
     currentOffer, countdown, isResponding, acceptOffer, declineOffer,
-  } = useDriverOffer(currentLocation ?? null);
+  } = useDriverOffer();
 
-  // Ride timer
+  // Start the dispatch engine from the driver page so it processes incoming ride_requests
   useEffect(() => {
-    if (activeRide?.status === 'in-progress') {
-      if (!rideTimerRef.current) {
-        rideTimerRef.current = setInterval(() => setRideTimer(p => p + 1), 1000);
-      }
-    } else {
-      if (rideTimerRef.current) { clearInterval(rideTimerRef.current); rideTimerRef.current = null; }
-      setRideTimer(0);
-    }
-    return () => { if (rideTimerRef.current) clearInterval(rideTimerRef.current); };
-  }, [activeRide?.status]);
+    if (!user?.uid) return;
+    const engine = getDispatchEngine(db);
+    engine.start();
+    return () => {
+      // Don't stop the engine on unmount - it's a singleton and should keep running
+    };
+  }, [user?.uid]);
 
   // Show nav bar when ride starts, clear directions when ride ends
   useEffect(() => {

@@ -14,22 +14,11 @@ import {
   subscribeToConnectedClients,
   subscribeToLiveRideRequests,
   subscribeToLiveActiveRides,
-  findBestDriver,
   type LiveDriver,
   type ConnectedClient,
   type LiveRideRequest,
   type LiveActiveRide,
 } from './realtime-service';
-import {
-  doc,
-  updateDoc,
-  addDoc,
-  collection,
-  serverTimestamp,
-  runTransaction,
-  getFirestore as getFS,
-} from 'firebase/firestore';
-import { calculateFare } from '@/lib/services/fare-service';
 
 export function useRealtime() {
   const [drivers, setDrivers] = useState<LiveDriver[]>([]);
@@ -37,7 +26,6 @@ export function useRealtime() {
   const [rideRequests, setRideRequests] = useState<LiveRideRequest[]>([]);
   const [activeRides, setActiveRides] = useState<LiveActiveRide[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [autoAssigning, setAutoAssigning] = useState<Set<string>>(new Set());
 
   const getDb = useCallback(() => {
     try {
@@ -106,159 +94,44 @@ export function useRealtime() {
         : 0,
   };
 
-  // ─── Assignation automatique ───────────────────────────────────────────────
+  // ─── Assignation automatique (delegates to dispatch engine) ──────────────────
   const autoAssign = useCallback(
     async (requestId: string): Promise<{ success: boolean; driverName?: string; error?: string }> => {
       const db = getDb();
       if (!db) return { success: false, error: 'Firebase non disponible' };
-
-      const request = rideRequests.find((r) => r.id === requestId);
-      if (!request) return { success: false, error: 'Demande introuvable' };
-
-      const bestDriver = findBestDriver(request, drivers);
-      if (!bestDriver) return { success: false, error: 'Aucun chauffeur disponible à proximité' };
-
-      if (autoAssigning.has(requestId)) return { success: false, error: 'Assignation en cours...' };
-
-      setAutoAssigning((prev) => new Set([...prev, requestId]));
-
       try {
-        await runTransaction(db, async (transaction) => {
-          const requestRef = doc(db, 'ride_requests', requestId);
-          const driverRef = doc(db, 'drivers', bestDriver.id);
-
-          const [reqSnap, drvSnap] = await Promise.all([
-            transaction.get(requestRef),
-            transaction.get(driverRef),
-          ]);
-
-          if (!reqSnap.exists() || reqSnap.data().status !== 'pending') {
-            throw new Error('Demande déjà assignée ou annulée');
-          }
-          if (!drvSnap.exists() || drvSnap.data().status !== 'online') {
-            throw new Error('Chauffeur non disponible');
-          }
-
-          const rideRef = doc(collection(db, 'active_rides'));
-
-          const fare = calculateFare(
-            request.estimatedDistanceKm || 5,
-            request.estimatedDurationMin || 10,
-            request.surgeMultiplier || 1.0,
-            request.serviceType || 'KULOOC X'
-          );
-
-          transaction.set(rideRef, {
-            requestId,
-            passengerId: request.passengerId,
-            passengerName: request.passengerName,
-            driverId: bestDriver.id,
-            driverName: bestDriver.name,
-            driverLocation: bestDriver.location || null,
-            pickup: request.pickup,
-            destination: request.destination,
-            serviceType: request.serviceType,
-            estimatedPrice: fare.total,
-            estimatedDistanceKm: fare.distanceKm,
-            estimatedDurationMin: fare.durationMin,
-            status: 'driver-assigned',
-            pricing: fare,
-            assignedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-
-          transaction.update(requestRef, {
-            status: 'driver-assigned',
-            driverId: bestDriver.id,
-            driverName: bestDriver.name,
-            assignedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-
-          transaction.update(driverRef, {
-            status: 'en-route',
-            currentRideId: rideRef.id,
-            updatedAt: serverTimestamp(),
-          });
-        });
-
-        return { success: true, driverName: bestDriver.name };
-      } catch (e: any) {
-        return { success: false, error: e.message };
-      } finally {
-        setAutoAssigning((prev) => {
-          const next = new Set(prev);
-          next.delete(requestId);
-          return next;
-        });
-      }
-    },
-    [drivers, rideRequests, getDb, autoAssigning]
-  );
-
-  // ─── Assignation manuelle ──────────────────────────────────────────────────
-  const manualAssign = useCallback(
-    async (requestId: string, driverId: string): Promise<{ success: boolean; error?: string }> => {
-      const db = getDb();
-      if (!db) return { success: false, error: 'Firebase non disponible' };
-
-      const request = rideRequests.find((r) => r.id === requestId);
-      const driver = drivers.find((d) => d.id === driverId);
-      if (!request || !driver) return { success: false, error: 'Données introuvables' };
-
-      try {
-        await runTransaction(db, async (transaction) => {
-          const requestRef = doc(db, 'ride_requests', requestId);
-          const driverRef = doc(db, 'drivers', driverId);
-          const rideRef = doc(collection(db, 'active_rides'));
-
-          const fare = calculateFare(
-            request.estimatedDistanceKm || 5,
-            request.estimatedDurationMin || 10,
-            request.surgeMultiplier || 1.0,
-            request.serviceType || 'KULOOC X'
-          );
-
-          transaction.set(rideRef, {
-            requestId,
-            passengerId: request.passengerId,
-            passengerName: request.passengerName,
-            driverId,
-            driverName: driver.name,
-            driverLocation: driver.location || null,
-            pickup: request.pickup,
-            destination: request.destination,
-            serviceType: request.serviceType,
-            estimatedPrice: fare.total,
-            estimatedDistanceKm: fare.distanceKm,
-            estimatedDurationMin: fare.durationMin,
-            status: 'driver-assigned',
-            pricing: fare,
-            assignedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-
-          transaction.update(requestRef, {
-            status: 'driver-assigned',
-            driverId,
-            driverName: driver.name,
-            assignedAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-
-          transaction.update(driverRef, {
-            status: 'en-route',
-            currentRideId: rideRef.id,
-            updatedAt: serverTimestamp(),
-          });
-        });
-
+        const { getDispatchEngine } = await import('@/lib/dispatch/dispatch-engine');
+        const engine = getDispatchEngine(db);
+        engine.start(); // ensure running
+        const { getDoc } = await import('firebase/firestore');
+        const { doc: docRef } = await import('firebase/firestore');
+        const snap = await getDoc(docRef(db, 'ride_requests', requestId));
+        if (!snap.exists()) return { success: false, error: 'Demande introuvable' };
+        await engine.processRequest({ id: snap.id, ...snap.data() } as any);
         return { success: true };
       } catch (e: any) {
         return { success: false, error: e.message };
       }
     },
-    [drivers, rideRequests, getDb]
+    [getDb]
+  );
+
+  // ─── Assignation manuelle (delegates to dispatch engine) ───────────────────
+  const manualAssign = useCallback(
+    async (requestId: string, driverId: string): Promise<{ success: boolean; error?: string }> => {
+      const db = getDb();
+      if (!db) return { success: false, error: 'Firebase non disponible' };
+      const driver = drivers.find((d) => d.id === driverId);
+      if (!driver) return { success: false, error: 'Chauffeur introuvable' };
+      try {
+        const { getDispatchEngine } = await import('@/lib/dispatch/dispatch-engine');
+        const engine = getDispatchEngine(db);
+        return await engine.directAssign(requestId, driverId, driver.name, driver.location ?? null);
+      } catch (e: any) {
+        return { success: false, error: e.message };
+      }
+    },
+    [drivers, getDb]
   );
 
   return {
@@ -270,6 +143,6 @@ export function useRealtime() {
     isLoading,
     autoAssign,
     manualAssign,
-    autoAssigning,
+    autoAssigning: new Set<string>(),
   };
 }
