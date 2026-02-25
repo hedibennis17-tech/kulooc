@@ -65,37 +65,43 @@ export interface DispatchRequest {
 }
 
 // ─── Sélection du meilleur chauffeur ─────────────────────────────────────────
+// RÈGLES:
+//   - location N'EST PAS requise (chauffeur sans GPS reçoit quand même)
+//   - status online OU en-route/on-trip SANS currentRideId (statut périmé)
 function selectBestDriver(
   request: DispatchRequest,
   drivers: DispatchDriver[],
   maxRadiusKm = 30
 ): DispatchDriver | null {
-  const available = drivers.filter(
-    (d) => d.status === 'online' && d.location && !d.currentRideId
-  );
+  // FIX: accepter online + en-route/on-trip sans currentRideId, ET sans exiger location
+  const available = drivers.filter((d) => {
+    if (d.currentRideId) return false;
+    return d.status === 'online' || d.status === 'en-route' || d.status === 'on-trip';
+  });
   if (available.length === 0) return null;
 
   const pickupLat = request.pickup.latitude;
   const pickupLng = request.pickup.longitude;
 
   const scored = available.map((d) => {
-    const distKm = haversineKm(
-      d.location!.latitude, d.location!.longitude,
-      pickupLat, pickupLng
-    );
-    if (distKm > maxRadiusKm) return null;
-
     const waitSeconds = d.onlineSince
       ? (Date.now() / 1000) - (d.onlineSince as Timestamp).seconds
       : 0;
 
-    const distScore = Math.max(0, 1 - distKm / 15);
+    // Distance: 0.5 (neutre) si pas de GPS, sinon score réel
+    let distScore = 0.5;
+    if (d.location?.latitude && d.location?.longitude) {
+      const distKm = haversineKm(d.location.latitude, d.location.longitude, pickupLat, pickupLng);
+      if (distKm > maxRadiusKm) distScore = 0.1; // hors rayon mais pas rejeté
+      else distScore = Math.max(0, 1 - distKm / 15);
+    }
+
     const waitScore = Math.min(1, waitSeconds / 3600);
     const ratingScore = (d.averageRating || 4.5) / 5;
 
     const total = 0.50 * waitScore + 0.30 * distScore + 0.20 * ratingScore;
-    return { driver: d, distKm, score: total };
-  }).filter(Boolean) as Array<{ driver: DispatchDriver; distKm: number; score: number }>;
+    return { driver: d, score: total };
+  }) as Array<{ driver: DispatchDriver; score: number }>;
 
   if (scored.length === 0) return null;
   scored.sort((a, b) => b.score - a.score);
@@ -111,6 +117,7 @@ export class DispatchEngine {
   private drivers: DispatchDriver[] = [];
   private processingIds = new Set<string>();
   private offerTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
+  private scanInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(db: Firestore) {
     this.db = db;
@@ -139,21 +146,68 @@ export class DispatchEngine {
         if (change.type === 'added') {
           const req = { id: change.doc.id, ...change.doc.data() } as DispatchRequest;
           if (!this.processingIds.has(req.id)) {
-            // Délai court pour laisser Firestore se stabiliser
+            console.log(`[engine] Nouvelle demande détectée: ${req.id}`);
             setTimeout(() => this.processRequest(req), 500);
           }
         }
       });
     });
+
+    // Scan périodique toutes les 10s — rattrape les demandes existantes
+    // et les offres expirées orphelines
+    this.scanInterval = setInterval(() => this.scanPending(), 10000);
+    // Scan immédiat au démarrage pour traiter les demandes déjà en attente
+    setTimeout(() => this.scanPending(), 2000);
+    console.log('[engine] Scan périodique activé (10s)');
   }
 
   stop() {
     this.unsubRequests?.();
     this.unsubDrivers?.();
+    if (this.scanInterval) { clearInterval(this.scanInterval); this.scanInterval = null; }
     this.offerTimeouts.forEach((t) => clearTimeout(t));
     this.offerTimeouts.clear();
     this.processingIds.clear();
     this.started = false;
+  }
+
+  /** Scan actif: rattrape pending existantes + offered orphelines */
+  private async scanPending() {
+    if (!this.started) return;
+    try {
+      const { getDocs } = await import('firebase/firestore');
+      // Pending non traitées
+      const pendingSnap = await getDocs(
+        query(collection(this.db, 'ride_requests'), where('status', '==', 'pending'))
+      );
+      for (const d of pendingSnap.docs) {
+        const req = { id: d.id, ...d.data() } as DispatchRequest;
+        if (!this.processingIds.has(req.id)) {
+          console.log(`[engine] scanPending → traite: ${req.id}`);
+          this.processRequest(req);
+        }
+      }
+      // Offered expirées sans timeout actif → remettre en pending
+      const offeredSnap = await getDocs(
+        query(collection(this.db, 'ride_requests'), where('status', '==', 'offered'))
+      );
+      for (const d of offeredSnap.docs) {
+        const req = { id: d.id, ...d.data() } as DispatchRequest;
+        if (req.offerExpiresAt && !this.offerTimeouts.has(req.id)) {
+          const expiresMs = (req.offerExpiresAt as Timestamp).toMillis?.() ?? 0;
+          if (Date.now() > expiresMs) {
+            await updateDoc(doc(this.db, 'ride_requests', req.id), {
+              status: 'pending', offeredToDriverId: null, offerExpiresAt: null,
+              updatedAt: serverTimestamp(),
+            }).catch(() => {});
+            this.processingIds.delete(req.id);
+            console.log(`[engine] Offre expirée orpheline remise en pending: ${req.id}`);
+          }
+        }
+      }
+    } catch (e: any) {
+      console.error('[engine] scanPending error:', e.message);
+    }
   }
 
   /** Déclencher manuellement le traitement d'une demande (ex: depuis useDispatch) */

@@ -289,7 +289,7 @@ export async function updateRideStatus(
   if (status === 'in-progress') updates.startedAt = serverTimestamp();
   if (status === 'completed') updates.completedAt = serverTimestamp();
 
-  await updateDoc(doc(db, 'active_rides', rideId), updates);
+  await updateDoc(doc(db, 'active_rides', rideId), updates as any);
 }
 
 // ─── Mettre à jour la position du chauffeur ───────────────────────────────────

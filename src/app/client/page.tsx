@@ -420,11 +420,16 @@ export default function ClientHomePage() {
         } catch (e) { console.warn('[client] dispatch API error:', e); return false; }
       };
       tryDispatch();
-      [5000, 12000].forEach(delay => {
+      // Retries: 3s / 8s / 15s / 25s / 40s pour couvrir jusqu'au prochain cron (60s)
+      [3000, 8000, 15000, 25000, 40000].forEach(delay => {
         setTimeout(async () => {
           const { getDoc, doc: fDoc } = await import('firebase/firestore');
           const snap = await getDoc(fDoc(db, 'ride_requests', requestId)).catch(() => null);
-          if (snap?.data()?.status === 'pending') tryDispatch();
+          const status = snap?.data()?.status;
+          if (status === 'pending' || status === 'offered') {
+            console.log(`[client] Retry dispatch à ${delay}ms — statut: ${status}`);
+            tryDispatch();
+          }
         }, delay);
       });
     } catch {

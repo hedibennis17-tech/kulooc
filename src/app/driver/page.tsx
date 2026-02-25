@@ -47,16 +47,18 @@ export default function DriverHomePage() {
   const { currentOffer, countdown, isResponding, acceptOffer, declineOffer } =
     useDriverOffer(currentLocation ?? null);
 
-  // Moteur de dispatch
+  // Moteur de dispatch — démarre dès que le chauffeur est authentifié
+  // FIX: ne pas dépendre de isOnline — le moteur doit toujours tourner
   useEffect(() => {
-    if (isOnline && !engineStartedRef.current) {
+    if (user?.uid && !engineStartedRef.current) {
       getDispatchEngine(db).start();
       engineStartedRef.current = true;
-    } else if (!isOnline && engineStartedRef.current) {
-      getDispatchEngine(db).stop();
-      engineStartedRef.current = false;
+      console.log('[engine] Moteur démarré pour', user.uid);
     }
-  }, [isOnline]);
+    return () => {
+      // Ne pas stopper au démontage — le moteur persiste en singleton
+    };
+  }, [user?.uid]);
 
   // Timer de course
   useEffect(() => {
