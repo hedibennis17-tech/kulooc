@@ -1,13 +1,15 @@
 'use client';
 
 import { useEffect } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { useUser } from '@/firebase/provider';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Loader2 } from 'lucide-react';
 
 export default function DriverAuthPage() {
+  const searchParams = useSearchParams();
+  const sessionExpired = searchParams?.get('reason') === 'session_expired';
   const { user, isUserLoading: loading } = useUser();
   const router = useRouter();
 

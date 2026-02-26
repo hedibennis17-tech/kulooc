@@ -13,6 +13,7 @@ import { FcGoogle } from 'react-icons/fc';
 import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword } from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { db, initializeFirebase } from '@/firebase';
+import { registerSession } from '@/lib/auth/session-manager';
 
 const { auth } = initializeFirebase();
 
@@ -47,6 +48,9 @@ export default function DriverLoginPage() {
         await auth.signOut();
         return;
       }
+      
+      // FEATURE 1: Enregistrer la session — déconnecte les autres navigateurs
+      await registerSession(result.user.uid);
       
       toast({
         title: 'Connexion réussie !',
@@ -92,6 +96,9 @@ export default function DriverLoginPage() {
         await auth.signOut();
         return;
       }
+      
+      // FEATURE 1: Enregistrer la session — déconnecte les autres navigateurs
+      await registerSession(result.user.uid);
       
       toast({
         title: 'Connexion réussie !',

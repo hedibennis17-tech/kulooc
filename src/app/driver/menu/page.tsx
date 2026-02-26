@@ -2,6 +2,8 @@
 import { useRouter } from 'next/navigation';
 import { useUser } from '@/firebase/provider';
 import { getAuth, signOut } from 'firebase/auth';
+import { useActiveRide } from '@/app/driver/layout';
+import { useToast } from '@/hooks/use-toast';
 import {
   ChevronRight, Car, FileText, Wallet, BarChart2, MessageSquare,
   HelpCircle, Gift, Settings, Shield, LogOut, Star, Bell, User,
@@ -63,7 +65,19 @@ export default function DriverMenuPage() {
   const { user } = useUser();
   const router = useRouter();
 
+  const { hasActiveRide } = useActiveRide();
+  const { toast } = useToast();
+
   const handleSignOut = async () => {
+    // FEATURE 2: Impossible de se déconnecter pendant une course active
+    if (hasActiveRide) {
+      toast({
+        title: '🚗 Course en cours',
+        description: 'Vous ne pouvez pas vous déconnecter pendant une course. Terminez la course d\'abord.',
+        variant: 'destructive',
+      });
+      return;
+    }
     const auth = getAuth();
     await signOut(auth);
     router.push('/driver/auth');

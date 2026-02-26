@@ -99,6 +99,15 @@ export default function DriverHomePage() {
 
   // ── Actions ───────────────────────────────────────────────────────────────
   const handleToggleOnline = async () => {
+    // FEATURE 2: Impossible de passer hors ligne pendant une course
+    if (isOnline && activeRide && ['driver-assigned', 'driver-arrived', 'in-progress'].includes(activeRide.status as string)) {
+      toast({
+        title: '🚗 Course en cours',
+        description: 'Terminez la course avant de passer hors ligne.',
+        variant: 'destructive',
+      });
+      return;
+    }
     if (isOnline) { await goOffline(); toast({ title: 'Hors ligne.' }); }
     else { await goOnline(); toast({ title: '✅ En ligne !', description: 'En attente de courses...' }); }
   };
