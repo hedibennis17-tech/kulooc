@@ -10,7 +10,13 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Mail, ArrowLeft } from 'lucide-react';
 import { FcGoogle } from 'react-icons/fc';
-import { signInWithPopup, GoogleAuthProvider, signInWithEmailAndPassword } from 'firebase/auth';
+import {
+  signInWithPopup,
+  GoogleAuthProvider,
+  signInWithEmailAndPassword,
+  fetchSignInMethodsForEmail,
+  linkWithCredential,
+} from 'firebase/auth';
 import { doc, getDoc } from 'firebase/firestore';
 import { db, initializeFirebase } from '@/firebase';
 import { registerSession } from '@/lib/auth/session-manager';
@@ -20,7 +26,7 @@ const { auth } = initializeFirebase();
 export default function DriverLoginPage() {
   const router = useRouter();
   const { toast } = useToast();
-  
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -35,10 +41,13 @@ export default function DriverLoginPage() {
     setIsLoading(true);
     try {
       const provider = new GoogleAuthProvider();
+      // Force le choix du compte à chaque connexion — empêche la réutilisation silencieuse
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       const result = await signInWithPopup(auth, provider);
-      
+
       const hasProfile = await checkDriverProfile(result.user.uid);
-      
+
       if (!hasProfile) {
         toast({
           title: 'Aucun compte chauffeur',
@@ -48,22 +57,51 @@ export default function DriverLoginPage() {
         await auth.signOut();
         return;
       }
-      
+
       // FEATURE 1: Enregistrer la session — déconnecte les autres navigateurs
       await registerSession(result.user.uid);
-      
+
       toast({
         title: 'Connexion réussie !',
         description: 'Bienvenue sur KULOOC.',
       });
-      
+
       router.push('/driver');
     } catch (error: any) {
-      toast({
-        title: 'Erreur de connexion',
-        description: error.message,
-        variant: 'destructive',
-      });
+      // Gérer le cas où l'email existe déjà avec un autre fournisseur
+      if (error.code === 'auth/account-exists-with-different-credential') {
+        const emailFromError = error.customData?.email;
+        if (emailFromError) {
+          try {
+            const methods = await fetchSignInMethodsForEmail(auth, emailFromError);
+            if (methods.includes('password')) {
+              toast({
+                title: 'Compte existant détecté',
+                description: 'Un compte existe déjà avec cet email. Connectez-vous avec email/mot de passe pour lier votre compte Google.',
+                variant: 'destructive',
+              });
+            } else {
+              toast({
+                title: 'Compte existant',
+                description: `Utilisez la méthode : ${methods.join(', ')} pour vous connecter.`,
+                variant: 'destructive',
+              });
+            }
+          } catch {
+            toast({
+              title: 'Erreur de connexion',
+              description: 'Un compte existe déjà avec cet email.',
+              variant: 'destructive',
+            });
+          }
+        }
+      } else if (error.code !== 'auth/popup-closed-by-user' && error.code !== 'auth/cancelled-popup-request') {
+        toast({
+          title: 'Erreur de connexion',
+          description: error.message,
+          variant: 'destructive',
+        });
+      }
     } finally {
       setIsLoading(false);
     }
@@ -71,7 +109,7 @@ export default function DriverLoginPage() {
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     if (!email || !password) {
       toast({
         title: 'Champs manquants',
@@ -80,13 +118,13 @@ export default function DriverLoginPage() {
       });
       return;
     }
-    
+
     setIsLoading(true);
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
-      
+
       const hasProfile = await checkDriverProfile(result.user.uid);
-      
+
       if (!hasProfile) {
         toast({
           title: 'Aucun compte chauffeur',
@@ -96,24 +134,26 @@ export default function DriverLoginPage() {
         await auth.signOut();
         return;
       }
-      
+
       // FEATURE 1: Enregistrer la session — déconnecte les autres navigateurs
       await registerSession(result.user.uid);
-      
+
       toast({
         title: 'Connexion réussie !',
         description: 'Bienvenue sur KULOOC.',
       });
-      
+
       router.push('/driver');
     } catch (error: any) {
       let errorMessage = 'Une erreur est survenue.';
-      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password') {
+      if (error.code === 'auth/user-not-found' || error.code === 'auth/wrong-password' || error.code === 'auth/invalid-credential') {
         errorMessage = 'Email ou mot de passe incorrect.';
       } else if (error.code === 'auth/invalid-email') {
         errorMessage = 'Email invalide.';
+      } else if (error.code === 'auth/too-many-requests') {
+        errorMessage = 'Trop de tentatives. Veuillez réessayer dans quelques minutes.';
       }
-      
+
       toast({
         title: 'Erreur de connexion',
         description: errorMessage,
@@ -153,7 +193,7 @@ export default function DriverLoginPage() {
               Accédez à votre espace chauffeur
             </CardDescription>
           </CardHeader>
-          
+
           <CardContent className="pt-6 space-y-6">
             <Button
               variant="outline"

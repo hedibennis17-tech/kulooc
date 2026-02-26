@@ -49,7 +49,7 @@ function NavigationRenderer({
   const [totalDuration, setTotalDuration] = useState('');
   const [speed, setSpeed] = useState(0);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [heading, setHeading] = useState(0);
+  const [heading, setHeading] = useState<number | null>(null);
   const [isNavigating, setIsNavigating] = useState(false);
   const watchIdRef = useRef<number | null>(null);
   const lastSpokenRef = useRef('');
@@ -117,9 +117,16 @@ function NavigationRenderer({
             setCurrentStepIndex(0);
             if (parsedSteps[0]) speak(parsedSteps[0].instruction);
           }
-          // Centrer la carte sur l'itinéraire
+          // Centrer la carte avec padding bottom pour décentrer le chauffeur vers le bas
           const bounds = result.routes[0]?.bounds;
-          if (bounds) map.fitBounds(bounds, { top: 80, bottom: 200, left: 20, right: 20 });
+          if (bounds) {
+            map.fitBounds(bounds, {
+              top: 80,
+              bottom: 260, // Padding bottom important : pousse la vue vers le haut
+              left: 20,
+              right: 20,
+            });
+          }
         }
       }
     );
@@ -136,10 +143,21 @@ function NavigationRenderer({
     if (!map) return;
 
     // Boussole via DeviceOrientationEvent
+    // webkitCompassHeading est disponible sur iOS (donne le cap réel)
+    // alpha sur Android (azimut magnétique)
     const handleOrientation = (e: DeviceOrientationEvent) => {
-      const alpha = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading ?? e.alpha;
-      if (alpha !== null) setHeading(Math.round(alpha));
+      const ev = e as DeviceOrientationEvent & { webkitCompassHeading?: number };
+      if (ev.webkitCompassHeading !== undefined && ev.webkitCompassHeading !== null) {
+        // iOS : webkitCompassHeading est déjà en degrés depuis le Nord (0-360)
+        setHeading(Math.round(ev.webkitCompassHeading));
+      } else if (e.alpha !== null) {
+        // Android : alpha est l'azimut (0 = Nord, croissant vers l'Est)
+        // Convertir en cap de navigation (même convention)
+        setHeading(Math.round(360 - e.alpha));
+      }
     };
+
+    // Préférer l'événement absolu (plus précis) si disponible
     window.addEventListener('deviceorientationabsolute', handleOrientation as EventListener, true);
     window.addEventListener('deviceorientation', handleOrientation as EventListener, true);
 
@@ -148,7 +166,17 @@ function NavigationRenderer({
       watchIdRef.current = navigator.geolocation.watchPosition(
         (pos) => {
           const current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+
+          // Utiliser le cap GPS si disponible (plus fiable en mouvement)
+          if (pos.coords.heading !== null && pos.coords.heading !== undefined && !isNaN(pos.coords.heading)) {
+            setHeading(Math.round(pos.coords.heading));
+          }
+
+          // Décentrer le marqueur vers le bas : utiliser panTo avec offset
+          // On décale le centre de la carte vers le haut pour que le chauffeur
+          // apparaisse dans le tiers inférieur de l'écran
           map.panTo(current);
+
           // Vitesse en km/h
           const kmh = Math.round((pos.coords.speed || 0) * 3.6);
           setSpeed(kmh);
@@ -202,20 +230,32 @@ function NavigationRenderer({
   const currentStep = steps[currentStepIndex];
   const nextStep = steps[currentStepIndex + 1];
 
+  // Rotation du triangle chauffeur : heading depuis le Nord
+  // null = pas encore de cap → afficher sans rotation
+  const markerRotation = heading !== null ? heading : 0;
+
   return (
     <>
-      {/* Marqueur position chauffeur */}
+      {/* ── Marqueur position chauffeur — triangle orienté vers le Nord ── */}
+      {/* Le marqueur est positionné à l'origine (position GPS réelle)      */}
+      {/* La carte est décalée vers le haut via paddingBottom pour que      */}
+      {/* le marqueur apparaisse dans le tiers inférieur de l'écran         */}
       <AdvancedMarker position={origin}>
         <div
-          className="w-10 h-10 rounded-full flex items-center justify-center shadow-xl border-2 border-white"
           style={{
-            background: mode === 'to-pickup' ? '#3B82F6' : '#EF4444',
-            transform: `rotate(${heading}deg)`,
-            transition: 'transform 0.3s ease',
+            width: 0,
+            height: 0,
+            // Triangle CSS pointant vers le haut (Nord)
+            borderLeft: '10px solid transparent',
+            borderRight: '10px solid transparent',
+            borderBottom: `22px solid ${mode === 'to-pickup' ? '#3B82F6' : '#EF4444'}`,
+            filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))',
+            transform: `rotate(${markerRotation}deg)`,
+            transition: 'transform 0.4s ease',
+            // Centrage du point de rotation au centre du triangle
+            transformOrigin: '50% 66%',
           }}
-        >
-          <Navigation size={18} className="text-white" fill="white" />
-        </div>
+        />
       </AdvancedMarker>
 
       {/* Marqueur destination */}
@@ -257,11 +297,16 @@ function NavigationRenderer({
             <div className="flex flex-col items-center gap-1 flex-shrink-0">
               <div
                 className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center"
-                style={{ transform: `rotate(${-heading}deg)`, transition: 'transform 0.3s' }}
+                style={{
+                  transform: `rotate(${heading !== null ? -heading : 0}deg)`,
+                  transition: 'transform 0.3s',
+                }}
               >
                 <Compass size={16} className="text-white" />
               </div>
-              <span className="text-white/60 text-xs">{heading}°</span>
+              <span className="text-white/60 text-xs">
+                {heading !== null ? `${heading}°` : '—'}
+              </span>
             </div>
           </div>
 
@@ -290,7 +335,13 @@ function NavigationRenderer({
 
         {/* Recentrer */}
         <button
-          onClick={() => map?.panTo(origin)}
+          onClick={() => {
+            if (map) {
+              map.panTo(origin);
+              // Appliquer le padding pour repositionner le chauffeur en bas
+              map.setZoom(17);
+            }
+          }}
           className="w-11 h-11 rounded-full bg-white shadow-lg flex items-center justify-center border border-gray-200"
         >
           <RotateCcw size={18} className="text-gray-700" />
@@ -300,7 +351,7 @@ function NavigationRenderer({
       {/* ── Barre de progression des étapes ── */}
       {steps.length > 0 && (
         <div className="absolute bottom-52 left-4 right-4 z-20">
-          <div className="bg-white/95 backdrop-blur rounded-2xl px-4 py-2 shadow flex items-center gap-3">
+          <div className="bg-white/95 backdrop-blur rounded-2xl px-4 py-2 flex items-center gap-2 shadow-lg">
             <button
               onClick={() => setCurrentStepIndex(i => Math.max(0, i - 1))}
               disabled={currentStepIndex === 0}
@@ -338,6 +389,13 @@ function NavigationRenderer({
           </div>
         </div>
       )}
+
+      {/* ── Indicateur vitesse (en bas à gauche) ── */}
+      {isNavigating && (
+        <div className="absolute bottom-52 right-4 z-20" style={{ bottom: steps.length > 0 ? '14rem' : '4rem' }}>
+          {/* vitesse déjà dans la barre de progression si steps > 0 */}
+        </div>
+      )}
     </>
   );
 }
@@ -351,11 +409,14 @@ export function NavigationMap(props: NavigationMapProps) {
       <div className="relative w-full h-full">
         <Map
           defaultCenter={props.origin}
-          defaultZoom={16}
+          defaultZoom={17}
           mapId="kulooc-nav-map"
           gestureHandling="greedy"
           disableDefaultUI={true}
           className="w-full h-full"
+          // paddingBottom pousse le centre de la carte vers le haut
+          // pour que le marqueur chauffeur apparaisse dans le tiers inférieur
+          style={{ paddingBottom: '200px' }}
         >
           <NavigationRenderer {...props} />
         </Map>

@@ -12,6 +12,15 @@
       "collectionGroup": "ride_requests",
       "queryScope": "COLLECTION",
       "fields": [
+        { "fieldPath": "offeredToDriverId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" },
+        { "fieldPath": "requestedAt", "order": "ASCENDING" }
+      ]
+    },
+    {
+      "collectionGroup": "ride_requests",
+      "queryScope": "COLLECTION",
+      "fields": [
         { "fieldPath": "passengerId", "order": "ASCENDING" },
         { "fieldPath": "createdAt", "order": "DESCENDING" }
       ]

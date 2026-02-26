@@ -1,12 +1,14 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { usePathname, useRouter } from 'next/navigation';
 import { useUser } from '@/firebase/provider';
 import { upsertClientProfile } from '@/lib/client/client-service';
 import { Car, Clock, Wallet, User } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { getAuth } from 'firebase/auth';
+import { watchSession } from '@/lib/auth/session-manager';
 
 const navItems = [
   { href: '/client', label: 'Course', icon: Car, exact: true },
@@ -19,6 +21,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   const pathname = usePathname();
   const router = useRouter();
   const { user, isUserLoading } = useUser();
+  const sessionWatchRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (!isUserLoading && !user) {
@@ -37,6 +40,30 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       }).catch(console.error);
     }
   }, [user]);
+
+  // ── FEATURE: Session unique client ──────────────────────────────────────────
+  // Si le même compte se connecte sur un autre appareil/navigateur,
+  // cette session est automatiquement déconnectée.
+  useEffect(() => {
+    if (!user?.uid) return;
+    const noSessionPages = ['/login', '/client/login', '/client/signup'];
+    if (noSessionPages.some(p => pathname.startsWith(p))) return;
+
+    if (sessionWatchRef.current) { sessionWatchRef.current(); sessionWatchRef.current = null; }
+
+    const auth = getAuth();
+    sessionWatchRef.current = watchSession(
+      user.uid,
+      auth,
+      () => {
+        // Session expulsée → rediriger vers login avec message
+        router.push('/login?reason=session_expired');
+      },
+      'clients'  // Collection Firestore pour les clients
+    );
+
+    return () => { if (sessionWatchRef.current) sessionWatchRef.current(); };
+  }, [user?.uid, pathname, router]);
 
   if (isUserLoading) {
     return (

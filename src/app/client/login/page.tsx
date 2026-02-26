@@ -8,16 +8,17 @@ import {
   signInWithPopup,
   GoogleAuthProvider,
   updateProfile,
+  fetchSignInMethodsForEmail,
 } from 'firebase/auth';
 import { useAuth, useUser } from '@/firebase/provider';
 import { upsertClientProfile } from '@/lib/client/client-service';
+import { registerSession } from '@/lib/auth/session-manager';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, Mail, Lock, User, Eye, EyeOff, Leaf } from 'lucide-react';
+import { Loader2, Mail, Lock, User, Eye, EyeOff } from 'lucide-react';
 import Link from 'next/link';
-import { cn } from '@/lib/utils';
 
 export default function ClientLoginPage() {
   const router = useRouter();
@@ -56,6 +57,7 @@ export default function ClientLoginPage() {
           email: form.email,
           displayName: form.name,
         });
+        await registerSession(cred.user.uid, 'clients');
         toast({ title: 'Compte créé !', description: `Bienvenue ${form.name} !` });
       } else {
         const cred = await signInWithEmailAndPassword(auth, form.email, form.password);
@@ -66,6 +68,7 @@ export default function ClientLoginPage() {
           displayName: cred.user.displayName || form.email.split('@')[0],
           photoURL: cred.user.photoURL || '',
         });
+        await registerSession(cred.user.uid, 'clients');
         toast({ title: 'Connexion réussie !' });
       }
       router.push('/client');
@@ -74,6 +77,7 @@ export default function ClientLoginPage() {
       if (err.code === 'auth/email-already-in-use') msg = 'Cet email est déjà utilisé.';
       if (err.code === 'auth/invalid-credential') msg = 'Email ou mot de passe incorrect.';
       if (err.code === 'auth/weak-password') msg = 'Le mot de passe doit contenir au moins 6 caractères.';
+      if (err.code === 'auth/too-many-requests') msg = 'Trop de tentatives. Réessayez dans quelques minutes.';
       toast({ title: 'Erreur', description: msg, variant: 'destructive' });
     } finally {
       setIsLoading(false);
@@ -84,6 +88,9 @@ export default function ClientLoginPage() {
     setIsLoading(true);
     try {
       const provider = new GoogleAuthProvider();
+      // Force le choix du compte à chaque connexion — empêche la réutilisation silencieuse
+      provider.setCustomParameters({ prompt: 'select_account' });
+
       const cred = await signInWithPopup(auth, provider);
       // Créer/mettre à jour le profil Firestore
       await upsertClientProfile(cred.user.uid, {
@@ -93,10 +100,39 @@ export default function ClientLoginPage() {
         photoURL: cred.user.photoURL || '',
         phoneNumber: cred.user.phoneNumber || '',
       });
+      await registerSession(cred.user.uid, 'clients');
       toast({ title: 'Connexion réussie !' });
       router.push('/client');
     } catch (err: any) {
-      if (err.code !== 'auth/popup-closed-by-user') {
+      // Gérer le cas où l'email existe déjà avec un autre fournisseur
+      if (err.code === 'auth/account-exists-with-different-credential') {
+        const emailFromError = err.customData?.email;
+        if (emailFromError) {
+          try {
+            const methods = await fetchSignInMethodsForEmail(auth, emailFromError);
+            if (methods.includes('password')) {
+              toast({
+                title: 'Compte existant détecté',
+                description: 'Un compte existe déjà avec cet email. Connectez-vous avec email/mot de passe.',
+                variant: 'destructive',
+              });
+              setIsSignUp(false);
+            } else {
+              toast({
+                title: 'Compte existant',
+                description: `Utilisez la méthode : ${methods.join(', ')} pour vous connecter.`,
+                variant: 'destructive',
+              });
+            }
+          } catch {
+            toast({
+              title: 'Erreur de connexion',
+              description: 'Un compte existe déjà avec cet email.',
+              variant: 'destructive',
+            });
+          }
+        }
+      } else if (err.code !== 'auth/popup-closed-by-user' && err.code !== 'auth/cancelled-popup-request') {
         toast({ title: 'Erreur Google', description: 'Impossible de se connecter.', variant: 'destructive' });
       }
     } finally {
@@ -114,7 +150,7 @@ export default function ClientLoginPage() {
 
   return (
     <div className="min-h-screen bg-white flex flex-col max-w-md mx-auto">
-      {/* Header rouge KULOOC */}
+      {/* Header noir KULOOC */}
       <div className="bg-black px-6 pt-12 pb-8 text-white">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 bg-red-600 rounded-xl flex items-center justify-center">
@@ -233,7 +269,7 @@ export default function ClientLoginPage() {
         {isSignUp && (
           <p className="text-center text-xs text-gray-400">
             En créant un compte, vous acceptez nos{' '}
-            <Link href="/help" className="underline">Conditions d'utilisation</Link>
+            <Link href="/help" className="underline">Conditions d&apos;utilisation</Link>
             {' '}et notre{' '}
             <Link href="/help" className="underline">Politique de confidentialité</Link>.
           </p>
