@@ -407,26 +407,9 @@ export default function ClientHomePage() {
       setStep('waiting');
       toast({ title: '🚗 Course demandée !', description: "Recherche d'un chauffeur en cours..." });
 
-      const tryDispatch = async () => {
-        try {
-          const res = await fetch('/api/dispatch', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ requestId }),
-          });
-          const data = await res.json().catch(() => ({}));
-          console.log('[client] dispatch API:', data);
-          return data.processed > 0 || data.assigned === true;
-        } catch (e) { console.warn('[client] dispatch API error:', e); return false; }
-      };
-      tryDispatch();
-      [5000, 12000].forEach(delay => {
-        setTimeout(async () => {
-          const { getDoc, doc: fDoc } = await import('firebase/firestore');
-          const snap = await getDoc(fDoc(db, 'ride_requests', requestId)).catch(() => null);
-          if (snap?.data()?.status === 'pending') tryDispatch();
-        }, delay);
-      });
+      // Le Dispatch Engine détecte automatiquement la ride_request via onSnapshot
+      // et assigne le meilleur chauffeur disponible — aucun appel API nécessaire
+      console.log('[KULOOC] ride_request créée:', requestId, '— moteur dispatch en attente');
     } catch {
       toast({ title: 'Erreur', description: 'Impossible de créer la course.', variant: 'destructive' });
     } finally {

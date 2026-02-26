@@ -214,16 +214,19 @@ export function subscribeToPassengerActiveRide(
 }
 
 // ─── Écouter les demandes en attente pour un chauffeur ───────────────────────
-// Inclut 'offered' pour que le chauffeur voie les offres qui lui sont destinées
+// Filtre sur offeredToDriverId pour que chaque chauffeur ne voit QUE ses offres
 
 export function subscribeToDriverPendingRequests(
+  driverId: string,
   callback: (requests: RideRequest[]) => void
 ): Unsubscribe {
+  // Écouter les offres destinées spécifiquement à CE chauffeur
   const q = query(
     collection(db, 'ride_requests'),
-    where('status', 'in', ['pending', 'offered']),
+    where('offeredToDriverId', '==', driverId),
+    where('status', '==', 'offered'),
     orderBy('requestedAt', 'asc'),
-    limit(10)
+    limit(5)
   );
 
   return onSnapshot(q, (snap) => {

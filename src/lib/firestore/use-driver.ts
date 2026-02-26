@@ -155,7 +155,7 @@ export function useDriver(): UseDriverReturn {
   // ── Écouter les demandes en attente (offered + pending) ───────────────────
   useEffect(() => {
     if (!isOnline || !user) return;
-    const unsub = subscribeToDriverPendingRequests((requests) => {
+    const unsub = subscribeToDriverPendingRequests(user.uid, (requests) => {
       setPendingRequests(requests);
     });
     return unsub;

@@ -1,8 +1,17 @@
 'use client';
+/**
+ * KULOOC — Layout chauffeur
+ * Le Dispatch Engine démarre ici pour tourner sur TOUTES les pages /driver/*
+ * même quand le chauffeur navigue vers /driver/earnings, /driver/inbox, etc.
+ */
+import { useEffect, useRef } from 'react';
 import { Home, DollarSign, Mail, Menu } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from '@/lib/utils';
+import { db } from '@/firebase';
+import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
+import { useUser } from '@/firebase/provider';
 
 const navItems = [
   { href: '/driver', label: 'Accueil', icon: Home },
@@ -13,6 +22,19 @@ const navItems = [
 
 export default function DriverLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const { user } = useUser();
+  const engineStarted = useRef(false);
+
+  // ─── Démarrer le moteur de dispatch dès que le chauffeur est authentifié ──────────────────
+  // Le moteur tourne sur TOUTES les pages /driver/* (pas seulement /driver)
+  useEffect(() => {
+    if (user && !engineStarted.current) {
+      const engine = getDispatchEngine(db);
+      engine.start();
+      engineStarted.current = true;
+      console.log('[KULOOC] Dispatch Engine démarré depuis DriverLayout');
+    }
+  }, [user]);
 
   // Pages sans navigation (onboarding, auth, login)
   const noNavPages = ['/driver/onboarding', '/driver/auth', '/driver/login', '/driver/signup'];
