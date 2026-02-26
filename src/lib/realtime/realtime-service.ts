@@ -187,7 +187,7 @@ export function subscribeToLiveRideRequests(
 ): Unsubscribe {
   const q = query(
     collection(db, 'ride_requests'),
-    where('status', 'in', ['pending', 'searching']),
+    where('status', 'in', ['pending', 'searching', 'offered']),
     orderBy('requestedAt', 'asc'),
     limit(50)
   );
