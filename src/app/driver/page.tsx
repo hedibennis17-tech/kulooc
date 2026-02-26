@@ -353,7 +353,7 @@ export default function DriverHomePage() {
 
   const {
     currentOffer, countdown, isResponding, acceptOffer, declineOffer,
-  } = useDriverOffer();
+  } = useDriverOffer(currentLocation);
 
   // Start the dispatch engine from the driver page so it processes incoming ride_requests
   useEffect(() => {

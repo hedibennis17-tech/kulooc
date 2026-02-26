@@ -75,6 +75,30 @@ export function useDriver(): UseDriverReturn {
   const activeRideRef = useRef<typeof activeRide>(null);
   useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
 
+  // ─── Read initial driver status from Firestore on mount ──────────────────
+  // This ensures that when a driver navigates between pages and comes back,
+  // the UI correctly reflects their actual online/offline state from the DB.
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'drivers', user.uid));
+        if (cancelled) return;
+        if (snap.exists()) {
+          const data = snap.data();
+          const dbStatus = data.status as DriverStatus;
+          if (dbStatus && dbStatus !== 'offline') {
+            setDriverStatus(dbStatus);
+          }
+        }
+      } catch (_) {
+        // Silently fail -- will default to 'offline'
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.uid]);
+
   // ─── Listen to pending requests ──────────────────────────────────────────
   useEffect(() => {
     if (!isOnline || !user) return;
@@ -103,12 +127,28 @@ export function useDriver(): UseDriverReturn {
     return unsub;
   }, [user?.uid]);
 
-  // ─── Online timer ────────────────────────────────────────────────────────
+  // ─── Online timer + heartbeat ─────────────────────────────────────────────
   useEffect(() => {
     if (isOnline) {
       onlineTimerRef.current = setInterval(() => {
         setOnlineDuration(prev => prev + 1);
       }, 1000);
+
+      // Heartbeat: update lastSeen every 30s to keep driver marked online
+      const heartbeat = setInterval(async () => {
+        if (!user?.uid) return;
+        try {
+          await setDoc(doc(db, 'drivers', user.uid), {
+            lastSeen: serverTimestamp(),
+            isOnline: true,
+          }, { merge: true });
+        } catch (_) {}
+      }, 30000);
+
+      return () => {
+        if (onlineTimerRef.current) clearInterval(onlineTimerRef.current);
+        clearInterval(heartbeat);
+      };
     } else {
       if (onlineTimerRef.current) clearInterval(onlineTimerRef.current);
       setOnlineDuration(0);
@@ -116,7 +156,7 @@ export function useDriver(): UseDriverReturn {
     return () => {
       if (onlineTimerRef.current) clearInterval(onlineTimerRef.current);
     };
-  }, [isOnline]);
+  }, [isOnline, user?.uid]);
 
   // ─── GPS tracking ────────────────────────────────────────────────────────
   useEffect(() => {

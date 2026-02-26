@@ -130,6 +130,13 @@ export class DispatchEngine {
     if (this.started) return; // Prevent double-start
     this.started = true;
     console.log('[Dispatch] Engine started');
+    this.setupListeners();
+  }
+
+  private setupListeners() {
+    // Cleanup any existing listeners first
+    this.unsubDrivers?.();
+    this.unsubRequests?.();
 
     // Listen to active drivers
     const driversQ = query(
@@ -140,6 +147,8 @@ export class DispatchEngine {
       this.drivers = snap.docs.map((d) => ({ id: d.id, ...d.data() } as DispatchDriver));
     }, (err) => {
       console.error('[Dispatch] Drivers listener error:', err.message);
+      // Auto-recover: re-establish listeners after 3s
+      setTimeout(() => this.setupListeners(), 3000);
     });
 
     // Listen to pending requests and auto-process new ones
@@ -159,6 +168,8 @@ export class DispatchEngine {
       });
     }, (err) => {
       console.error('[Dispatch] Requests listener error:', err.message);
+      // Auto-recover: re-establish listeners after 3s
+      setTimeout(() => this.setupListeners(), 3000);
     });
   }
 
@@ -172,12 +183,23 @@ export class DispatchEngine {
   }
 
   /**
-   * Process a pending request: find best driver and create an offer
+   * Process a pending request: find best driver and create an offer.
+   * If no drivers available yet (listener still loading), retries up to 3 times.
    */
-  public async processRequest(request: DispatchRequest) {
-    if (this.processingIds.has(request.id)) return;
+  public async processRequest(request: DispatchRequest, retryCount = 0) {
+    if (this.processingIds.has(request.id) && retryCount === 0) return;
     this.processingIds.add(request.id);
-    console.log('[Dispatch] Processing request:', request.id, 'available drivers:', this.drivers.filter(d => d.status === 'online').length);
+
+    const onlineDrivers = this.drivers.filter(d => d.status === 'online' && !d.currentRideId);
+    console.log('[Dispatch] Processing request:', request.id, 'online drivers:', onlineDrivers.length, 'retry:', retryCount);
+
+    // If no online drivers and we haven't retried too many times, wait and retry
+    if (onlineDrivers.length === 0 && retryCount < 3) {
+      console.log('[Dispatch] No online drivers yet, retrying in 3s...');
+      setTimeout(() => this.processRequest(request, retryCount + 1), 3000);
+      return;
+    }
+
     await this.offerToNextDriver(request.id, []);
   }
 
