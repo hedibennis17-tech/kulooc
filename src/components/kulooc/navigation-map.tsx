@@ -1,338 +1,278 @@
 'use client';
-import { useEffect, useRef, useState, useCallback } from 'react';
+/**
+ * KULOOC — NavigationMap v3
+ * Style: Image 1 (reference) + Image 4
+ *  ┌───────────────────────────────────────────────────────────┐
+ *  │ TOP: Panneau noir — manœuvre + distance + rue             │
+ *  │      Sous-barre: durée | km | destination                 │
+ *  ├───────────────────────────────────────────────────────────┤
+ *  │ MAP: Triangle dans tiers inférieur (centre décalé avant)  │
+ *  ├───────────────────────────────────────────────────────────┤
+ *  │ BAS: Overlay sombre — passager + durée + bouton action    │
+ *  └───────────────────────────────────────────────────────────┘
+ * SUPPRIMÉ: barre des étapes (1/20) au milieu
+ */
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { APIProvider, Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
-import { Navigation, Volume2, VolumeX, Compass, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { Volume2, VolumeX, Navigation2 } from 'lucide-react';
 
-interface LatLng {
-  lat: number;
-  lng: number;
-}
+interface LatLng { lat: number; lng: number; }
+interface NavigationStep { instruction: string; distance: string; maneuver?: string; }
 
-interface NavigationStep {
-  instruction: string;
-  distance: string;
-  duration: string;
-  maneuver?: string;
-}
-
-interface NavigationMapProps {
+export interface NavigationMapProps {
   origin: LatLng;
   destination: LatLng;
   destinationLabel?: string;
   onArrived?: () => void;
   mode?: 'to-pickup' | 'to-destination';
+  passengerName?: string;
+  actionLabel?: string;
+  actionColor?: string;
+  onAction?: () => void;
+  onRouteCalculated?: (distanceKm: number, durationMin: number) => void;
 }
 
-// ─── Composant interne qui utilise useMap ───────────────────────────────────
-function NavigationRenderer({
-  origin,
-  destination,
-  destinationLabel,
-  onArrived,
-  mode,
-}: NavigationMapProps) {
-  const map = useMap();
-  const directionsRendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
-  const [steps, setSteps] = useState<NavigationStep[]>([]);
-  const [currentStepIndex, setCurrentStepIndex] = useState(0);
-  const [totalDistance, setTotalDistance] = useState('');
-  const [totalDuration, setTotalDuration] = useState('');
-  const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [heading, setHeading] = useState(0);
-  const [isNavigating, setIsNavigating] = useState(false);
-  const watchIdRef = useRef<number | null>(null);
-  const lastSpokenRef = useRef('');
+export interface NavigationMapRef {
+  recenter: () => void;
+}
 
-  // Synthèse vocale
-  const speak = useCallback((text: string) => {
-    if (!voiceEnabled || lastSpokenRef.current === text) return;
-    lastSpokenRef.current = text;
+function ManeuverArrow({ m }: { m: string }) {
+  if (m.includes('left'))      return <span style={{ display:'inline-block', transform:'rotate(-90deg)', fontSize:26 }}>↑</span>;
+  if (m.includes('right'))     return <span style={{ display:'inline-block', transform:'rotate(90deg)', fontSize:26 }}>↑</span>;
+  if (m.includes('uturn'))     return <span style={{ fontSize:24 }}>↩</span>;
+  if (m.includes('roundabout'))return <span style={{ fontSize:22 }}>↻</span>;
+  return <span style={{ fontSize:26 }}>↑</span>;
+}
+
+function offsetCenter(pos: LatLng, heading: number, deg = 0.0025): LatLng {
+  const rad = (heading * Math.PI) / 180;
+  return { lat: pos.lat + deg * Math.cos(rad), lng: pos.lng + deg * Math.sin(rad) };
+}
+
+const NavigationRenderer = forwardRef<NavigationMapRef, NavigationMapProps & { onCenter: (c:LatLng)=>void }>(
+  function NR({ origin, destination, destinationLabel, onArrived, mode, onAction, actionLabel, actionColor, passengerName, onRouteCalculated, onCenter }, ref) {
+  const map = useMap();
+  const rendererRef = useRef<google.maps.DirectionsRenderer|null>(null);
+  const watchRef = useRef<number|null>(null);
+  const [steps, setSteps] = useState<NavigationStep[]>([]);
+  const [totalDist, setTotalDist] = useState('');
+  const [totalTime, setTotalTime] = useState('');
+  const [voice, setVoice] = useState(true);
+  const [heading, setHeading] = useState(0);
+  const [pos, setPos] = useState<LatLng>(origin);
+  const lastSpoken = useRef('');
+
+  useImperativeHandle(ref, () => ({
+    recenter() { if (map) { map.panTo(offsetCenter(pos,heading)); map.setZoom(17); } }
+  }));
+
+  const speak = useCallback((txt: string) => {
+    if (!voice || lastSpoken.current === txt) return;
+    lastSpoken.current = txt;
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-      const utterance = new SpeechSynthesisUtterance(text);
-      utterance.lang = 'fr-CA';
-      utterance.rate = 0.95;
-      utterance.volume = 1;
-      window.speechSynthesis.speak(utterance);
+      const u = new SpeechSynthesisUtterance(txt);
+      u.lang = 'fr-CA'; u.rate = 0.92;
+      window.speechSynthesis.speak(u);
     }
-  }, [voiceEnabled]);
+  }, [voice]);
 
-  // Calculer l'itinéraire via Directions API
-  useEffect(() => {
-    if (!map || !origin || !destination) return;
-
-    const directionsService = new google.maps.DirectionsService();
-
-    // Supprimer l'ancien renderer
-    if (directionsRendererRef.current) {
-      directionsRendererRef.current.setMap(null);
-    }
-
-    const renderer = new google.maps.DirectionsRenderer({
-      suppressMarkers: true,
-      polylineOptions: {
-        strokeColor: mode === 'to-pickup' ? '#3B82F6' : '#EF4444',
-        strokeWeight: 6,
-        strokeOpacity: 0.9,
-      },
-    });
-    renderer.setMap(map);
-    directionsRendererRef.current = renderer;
-
-    directionsService.route(
-      {
-        origin: new google.maps.LatLng(origin.lat, origin.lng),
-        destination: new google.maps.LatLng(destination.lat, destination.lng),
-        travelMode: google.maps.TravelMode.DRIVING,
-        drivingOptions: {
-          departureTime: new Date(),
-          trafficModel: google.maps.TrafficModel.BEST_GUESS,
-        },
-      },
-      (result, status) => {
-        if (status === 'OK' && result) {
-          renderer.setDirections(result);
-          const leg = result.routes[0]?.legs[0];
-          if (leg) {
-            setTotalDistance(leg.distance?.text || '');
-            setTotalDuration(leg.duration_in_traffic?.text || leg.duration?.text || '');
-            const parsedSteps: NavigationStep[] = leg.steps.map((s) => ({
-              instruction: s.instructions.replace(/<[^>]*>/g, ''),
-              distance: s.distance?.text || '',
-              duration: s.duration?.text || '',
-              maneuver: s.maneuver || '',
-            }));
-            setSteps(parsedSteps);
-            setCurrentStepIndex(0);
-            if (parsedSteps[0]) speak(parsedSteps[0].instruction);
-          }
-          // Centrer la carte sur l'itinéraire
-          const bounds = result.routes[0]?.bounds;
-          if (bounds) map.fitBounds(bounds, { top: 80, bottom: 200, left: 20, right: 20 });
-        }
-      }
-    );
-
-    return () => {
-      if (directionsRendererRef.current) {
-        directionsRendererRef.current.setMap(null);
-      }
-    };
-  }, [map, origin.lat, origin.lng, destination.lat, destination.lng, mode, speak]);
-
-  // Suivi GPS en temps réel + boussole
   useEffect(() => {
     if (!map) return;
+    const svc = new google.maps.DirectionsService();
+    if (rendererRef.current) rendererRef.current.setMap(null);
+    const rndr = new google.maps.DirectionsRenderer({
+      suppressMarkers: true,
+      preserveViewport: true,
+      polylineOptions: { strokeColor: mode === 'to-pickup' ? '#2563EB' : '#DC2626', strokeWeight: 7, strokeOpacity: 0.95 },
+    });
+    rndr.setMap(map);
+    rendererRef.current = rndr;
+    svc.route({
+      origin: new google.maps.LatLng(origin.lat, origin.lng),
+      destination: new google.maps.LatLng(destination.lat, destination.lng),
+      travelMode: google.maps.TravelMode.DRIVING,
+      drivingOptions: { departureTime: new Date(), trafficModel: google.maps.TrafficModel.BEST_GUESS },
+    }, (res, stat) => {
+      if (stat === 'OK' && res) {
+        rndr.setDirections(res);
+        const leg = res.routes[0]?.legs[0];
+        if (leg) {
+          setTotalDist(leg.distance?.text || '');
+          setTotalTime(leg.duration_in_traffic?.text || leg.duration?.text || '');
+          const parsed: NavigationStep[] = leg.steps.map(s => ({
+            instruction: s.instructions.replace(/<[^>]*>/g,''),
+            distance: s.distance?.text || '',
+            maneuver: s.maneuver || '',
+          }));
+          setSteps(parsed);
+          if (parsed[0]) speak(parsed[0].instruction);
+          if (onRouteCalculated && leg.distance && leg.duration) {
+            onRouteCalculated((leg.distance.value||0)/1000, Math.ceil((leg.duration.value||0)/60));
+          }
+        }
+      }
+    });
+    return () => { if (rendererRef.current) rendererRef.current.setMap(null); };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, origin.lat, origin.lng, destination.lat, destination.lng, mode]);
 
-    // Boussole via DeviceOrientationEvent
-    const handleOrientation = (e: DeviceOrientationEvent) => {
-      const alpha = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading ?? e.alpha;
-      if (alpha !== null) setHeading(Math.round(alpha));
+  useEffect(() => {
+    if (!map) return;
+    const orient = (e: DeviceOrientationEvent) => {
+      const h = (e as DeviceOrientationEvent & { webkitCompassHeading?: number }).webkitCompassHeading ?? e.alpha;
+      if (h !== null) setHeading(Math.round(h));
     };
-    window.addEventListener('deviceorientationabsolute', handleOrientation as EventListener, true);
-    window.addEventListener('deviceorientation', handleOrientation as EventListener, true);
-
-    // Suivi position GPS
+    window.addEventListener('deviceorientationabsolute', orient as EventListener, true);
+    window.addEventListener('deviceorientation', orient as EventListener, true);
     if (navigator.geolocation) {
-      watchIdRef.current = navigator.geolocation.watchPosition(
-        (pos) => {
-          const current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
-          map.panTo(current);
-
-          // Vérifier si on est arrivé (< 50m de la destination)
-          const dist = google.maps.geometry.spherical.computeDistanceBetween(
-            new google.maps.LatLng(current.lat, current.lng),
+      watchRef.current = navigator.geolocation.watchPosition(p => {
+        const cur = { lat: p.coords.latitude, lng: p.coords.longitude };
+        if (p.coords.heading !== null && !isNaN(p.coords.heading!)) setHeading(Math.round(p.coords.heading!));
+        setPos(cur);
+        const ctr = offsetCenter(cur, heading, 0.0025);
+        map.panTo(ctr);
+        onCenter(ctr);
+        try {
+          const d = google.maps.geometry.spherical.computeDistanceBetween(
+            new google.maps.LatLng(cur.lat, cur.lng),
             new google.maps.LatLng(destination.lat, destination.lng)
           );
-          if (dist < 50 && onArrived) {
-            speak('Vous êtes arrivé à destination');
-            onArrived();
-          }
-        },
-        null,
-        { enableHighAccuracy: true, maximumAge: 2000, timeout: 5000 }
-      );
+          if (d < 60 && onArrived) { speak('Vous êtes arrivé'); onArrived(); }
+        } catch { /* geometry loading */ }
+      }, null, { enableHighAccuracy: true, maximumAge: 1500, timeout: 8000 });
     }
-
-    setIsNavigating(true);
-
     return () => {
-      window.removeEventListener('deviceorientationabsolute', handleOrientation as EventListener, true);
-      window.removeEventListener('deviceorientation', handleOrientation as EventListener, true);
-      if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
+      window.removeEventListener('deviceorientationabsolute', orient as EventListener, true);
+      window.removeEventListener('deviceorientation', orient as EventListener, true);
+      if (watchRef.current !== null) navigator.geolocation.clearWatch(watchRef.current);
     };
-  }, [map, destination.lat, destination.lng, onArrived, speak]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, destination.lat, destination.lng, onArrived, heading]);
 
-  // Icône de manœuvre
-  const getManeuverIcon = (maneuver: string) => {
-    if (maneuver.includes('left')) return '↰';
-    if (maneuver.includes('right')) return '↱';
-    if (maneuver.includes('uturn')) return '↩';
-    if (maneuver.includes('roundabout')) return '↻';
-    return '↑';
-  };
-
-  const currentStep = steps[currentStepIndex];
-  const nextStep = steps[currentStepIndex + 1];
+  const color = mode === 'to-pickup' ? '#2563EB' : '#DC2626';
+  const step = steps[0];
 
   return (
     <>
-      {/* Marqueur position chauffeur */}
-      <AdvancedMarker position={origin}>
-        <div
-          className="w-10 h-10 rounded-full flex items-center justify-center shadow-xl border-2 border-white"
-          style={{
-            background: mode === 'to-pickup' ? '#3B82F6' : '#EF4444',
-            transform: `rotate(${heading}deg)`,
-            transition: 'transform 0.3s ease',
-          }}
-        >
-          <Navigation size={18} className="text-white" fill="white" />
+      {/* Marqueur chauffeur — triangle orienté, tiers inférieur */}
+      <AdvancedMarker position={pos}>
+        <div style={{ transform:`rotate(${heading}deg)`, transition:'transform 0.4s ease', filter:'drop-shadow(0 3px 8px rgba(0,0,0,0.6))' }}>
+          <svg width="28" height="36" viewBox="0 0 28 36" fill="none">
+            {/* Triangle navigation (pointe en haut = nord) */}
+            <polygon points="14,2 27,34 14,27 1,34" fill={color} stroke="white" strokeWidth="2.5" strokeLinejoin="round"/>
+          </svg>
         </div>
       </AdvancedMarker>
 
       {/* Marqueur destination */}
       <AdvancedMarker position={destination}>
         <div className="flex flex-col items-center">
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center shadow-xl border-2 border-white text-white font-black text-xs"
-            style={{ background: mode === 'to-pickup' ? '#3B82F6' : '#EF4444' }}
-          >
+          <div style={{ width:44, height:44, borderRadius:'50%', background:color, border:'3px solid white', display:'flex', alignItems:'center', justifyContent:'center', boxShadow:'0 4px 14px rgba(0,0,0,0.4)', fontSize:20 }}>
             {mode === 'to-pickup' ? '👤' : '🏁'}
           </div>
           {destinationLabel && (
-            <div className="mt-1 bg-white rounded-lg px-2 py-0.5 text-xs font-bold shadow text-gray-800 max-w-28 text-center truncate">
+            <div style={{ marginTop:4, background:'white', borderRadius:8, padding:'3px 8px', fontSize:11, fontWeight:700, boxShadow:'0 2px 6px rgba(0,0,0,0.2)', maxWidth:130, textAlign:'center', whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis' }}>
               {destinationLabel}
             </div>
           )}
         </div>
       </AdvancedMarker>
 
-      {/* ── Bandeau instruction en haut ── */}
-      {currentStep && (
-        <div
-          className="absolute top-0 left-0 right-0 z-20 px-4 pt-safe"
-          style={{ paddingTop: 'env(safe-area-inset-top, 12px)' }}
-        >
-          <div
-            className="rounded-2xl shadow-2xl p-4 flex items-center gap-3"
-            style={{ background: mode === 'to-pickup' ? '#1D4ED8' : '#DC2626' }}
-          >
-            {/* Icône manœuvre */}
-            <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl flex-shrink-0">
-              {getManeuverIcon(currentStep.maneuver || '')}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-black text-base leading-tight">{currentStep.instruction}</p>
-              <p className="text-white/70 text-sm mt-0.5">{currentStep.distance}</p>
-            </div>
-            {/* Boussole */}
-            <div className="flex flex-col items-center gap-1 flex-shrink-0">
-              <div
-                className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center"
-                style={{ transform: `rotate(${-heading}deg)`, transition: 'transform 0.3s' }}
-              >
-                <Compass size={16} className="text-white" />
+      {/* ═══ TOP — Instruction sombre (style Google Maps / Image 1) ═══ */}
+      {step && (
+        <div className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop:'env(safe-area-inset-top, 6px)' }}>
+          <div className="mx-3 mt-2 rounded-2xl shadow-2xl overflow-hidden" style={{ background:'rgba(16,16,18,0.97)' }}>
+            <div className="flex items-center gap-3 px-4 py-3">
+              {/* Icône manœuvre carré coloré */}
+              <div className="flex-shrink-0 w-14 h-14 rounded-xl flex items-center justify-center" style={{ background:color }}>
+                <div className="text-white font-black"><ManeuverArrow m={step.maneuver||''} /></div>
               </div>
-              <span className="text-white/60 text-xs">{heading}°</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-white font-black text-xl leading-tight">{step.distance}</p>
+                <p className="text-white/75 text-sm leading-snug mt-0.5 line-clamp-2">{step.instruction}</p>
+              </div>
+              <button onClick={() => setVoice(v=>!v)} className="w-10 h-10 rounded-full flex items-center justify-center flex-shrink-0" style={{ background:'rgba(255,255,255,0.1)' }}>
+                {voice ? <Volume2 size={17} className="text-white"/> : <VolumeX size={17} className="text-red-400"/>}
+              </button>
+            </div>
+            {/* Sous-barre infos: durée | distance | destination */}
+            <div className="flex items-center gap-3 px-4 py-2" style={{ borderTop:'1px solid rgba(255,255,255,0.07)' }}>
+              <span className="text-white font-black text-sm">{totalTime}</span>
+              <span className="text-white/25">|</span>
+              <span className="text-white/65 text-sm">{totalDist}</span>
+              <span className="text-white/25">|</span>
+              <span className="text-white/45 text-xs truncate flex-1">{destinationLabel || (mode === 'to-pickup' ? 'Passager' : 'Destination')}</span>
             </div>
           </div>
-
-          {/* Prochaine instruction */}
-          {nextStep && (
-            <div className="mt-2 bg-white/95 backdrop-blur rounded-xl px-4 py-2 flex items-center gap-2 shadow">
-              <span className="text-gray-400 text-sm">Ensuite :</span>
-              <span className="text-gray-800 text-sm font-semibold truncate">{nextStep.instruction}</span>
-              <span className="text-gray-400 text-xs ml-auto flex-shrink-0">{nextStep.distance}</span>
-            </div>
-          )}
         </div>
       )}
 
-      {/* ── Contrôles navigation en bas à droite ── */}
-      <div className="absolute right-4 bottom-56 z-20 flex flex-col gap-2">
-        {/* Bouton son */}
+      {/* ═══ DROITE — Recentrer ═══ */}
+      <div className="absolute right-3 z-20" style={{ bottom:170 }}>
         <button
-          onClick={() => setVoiceEnabled(v => !v)}
-          className="w-11 h-11 rounded-full bg-white shadow-lg flex items-center justify-center border border-gray-200"
+          onClick={() => { if (map) { map.panTo(offsetCenter(pos,heading,0.0025)); map.setZoom(17); } }}
+          className="w-11 h-11 rounded-full shadow-lg flex items-center justify-center"
+          style={{ background:'rgba(255,255,255,0.95)' }}
         >
-          {voiceEnabled
-            ? <Volume2 size={18} className="text-gray-700" />
-            : <VolumeX size={18} className="text-red-500" />}
-        </button>
-
-        {/* Recentrer */}
-        <button
-          onClick={() => map?.panTo(origin)}
-          className="w-11 h-11 rounded-full bg-white shadow-lg flex items-center justify-center border border-gray-200"
-        >
-          <RotateCcw size={18} className="text-gray-700" />
+          <Navigation2 size={18} className="text-gray-700"/>
         </button>
       </div>
 
-      {/* ── Barre de progression des étapes ── */}
-      {steps.length > 0 && (
-        <div className="absolute bottom-52 left-4 right-4 z-20">
-          <div className="bg-white/95 backdrop-blur rounded-2xl px-4 py-2 shadow flex items-center gap-3">
-            <button
-              onClick={() => setCurrentStepIndex(i => Math.max(0, i - 1))}
-              disabled={currentStepIndex === 0}
-              className="p-1 disabled:opacity-30"
-            >
-              <ChevronLeft size={18} className="text-gray-600" />
-            </button>
-            <div className="flex-1 text-center">
-              <p className="text-xs text-gray-500">Étape {currentStepIndex + 1}/{steps.length}</p>
-              <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
-                <div
-                  className="h-1.5 rounded-full transition-all"
-                  style={{
-                    width: `${((currentStepIndex + 1) / steps.length) * 100}%`,
-                    background: mode === 'to-pickup' ? '#3B82F6' : '#EF4444',
-                  }}
-                />
+      {/* ═══ BAS — Overlay action (style barre rouge Image 1) ═══ */}
+      {onAction && actionLabel && (
+        <div className="absolute left-0 right-0 z-20 px-4" style={{ bottom:0, paddingBottom:'calc(env(safe-area-inset-bottom, 8px) + 8px)' }}>
+          <div className="rounded-2xl overflow-hidden shadow-2xl" style={{ background:'rgba(14,14,16,0.96)' }}>
+            {passengerName && (
+              <div className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <p className="text-white/50 text-xs uppercase tracking-wider font-semibold">
+                    {mode === 'to-pickup' ? 'Aller chercher' : 'Déposer'}
+                  </p>
+                  <p className="text-white font-black text-base mt-0.5">{passengerName}</p>
+                </div>
+                <div className="text-right">
+                  <p className="text-white font-black text-lg">{totalTime}</p>
+                  <p className="text-white/45 text-sm">{totalDist}</p>
+                </div>
               </div>
-            </div>
-            <button
-              onClick={() => {
-                const next = Math.min(steps.length - 1, currentStepIndex + 1);
-                setCurrentStepIndex(next);
-                if (steps[next]) speak(steps[next].instruction);
-              }}
-              disabled={currentStepIndex === steps.length - 1}
-              className="p-1 disabled:opacity-30"
-            >
-              <ChevronRight size={18} className="text-gray-600" />
-            </button>
-            <div className="border-l border-gray-200 pl-3 text-right">
-              <p className="text-xs font-bold text-gray-800">{totalDuration}</p>
-              <p className="text-xs text-gray-500">{totalDistance}</p>
+            )}
+            <div className="px-3 pb-3">
+              <button
+                onClick={onAction}
+                className="w-full py-4 rounded-xl font-black text-base text-white flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+                style={{ background: actionColor || color }}
+              >
+                {actionLabel}
+              </button>
             </div>
           </div>
         </div>
       )}
     </>
   );
-}
+});
+NavigationRenderer.displayName = 'NavigationRenderer';
 
-// ─── Composant principal exporté ────────────────────────────────────────────
-export function NavigationMap(props: NavigationMapProps) {
-  const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || '';
-
-  return (
-    <APIProvider apiKey={apiKey} libraries={['geometry']}>
-      <div className="relative w-full h-full">
-        <Map
-          defaultCenter={props.origin}
-          defaultZoom={16}
-          mapId="kulooc-nav-map"
-          gestureHandling="greedy"
-          disableDefaultUI={true}
-          className="w-full h-full"
-        >
-          <NavigationRenderer {...props} />
-        </Map>
-      </div>
-    </APIProvider>
-  );
-}
+// ── Export principal ──────────────────────────────────────────────────────────
+export const NavigationMap = forwardRef<NavigationMapRef, NavigationMapProps>(
+  function NavigationMap(props, ref) {
+    const [mapCenter, setMapCenter] = useState(props.origin);
+    return (
+      <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || ''} libraries={['geometry', 'routes']}>
+        <div className="relative w-full h-full">
+          <Map
+            center={mapCenter}
+            zoom={17}
+            mapId="kulooc-nav-v3"
+            gestureHandling="greedy"
+            disableDefaultUI={true}
+            className="w-full h-full"
+          >
+            <NavigationRenderer ref={ref} {...props} onCenter={setMapCenter} />
+          </Map>
+        </div>
+      </APIProvider>
+    );
+  }
+);
