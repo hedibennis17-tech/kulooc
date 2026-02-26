@@ -6,7 +6,23 @@
 import { useState } from 'react';
 import { Star, MapPin, Clock, DollarSign, Download } from 'lucide-react';
 import { RatingModal } from './rating-modal';
+import { doc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { db } from '@/firebase';
 import type { FareBreakdown } from '@/lib/services/fare-service';
+
+/** Force-reset driver status to online when closing summary */
+async function pingDriverOnlineFromSummary(driverId: string) {
+  try {
+    await updateDoc(doc(db, 'drivers', driverId), {
+      status: 'online',
+      currentRideId: null,
+      isOnline: true,
+      onlineSince: serverTimestamp(),
+      lastSeen: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (_) {}
+}
 
 interface RideSummaryProps {
   rideId: string;
@@ -165,7 +181,13 @@ export function RideSummary({
             Évaluer {userRole === 'passenger' ? 'le chauffeur' : 'le passager'}
           </button>
           <button
-            onClick={onClose}
+            onClick={async () => {
+              // Ping driver back online even if they skip rating
+              if (userRole === 'driver') {
+                await pingDriverOnlineFromSummary(driverId);
+              }
+              onClose();
+            }}
             className="w-full py-3 rounded-full border-2 border-gray-200 font-semibold text-gray-600"
           >
             Fermer

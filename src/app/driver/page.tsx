@@ -17,6 +17,7 @@ import {
   SheetDescription,
 } from '@/components/ui/sheet';
 import { cn } from '@/lib/utils';
+import { RideSummary } from '@/components/kulooc/ride-summary';
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -340,6 +341,7 @@ export default function DriverHomePage() {
   const [rideTimer, setRideTimer] = useState(0);
   const [navBarVisible, setNavBarVisible] = useState(true);
   const [panelCollapsed, setPanelCollapsed] = useState(false);
+  const [completedRideData, setCompletedRideData] = useState<any>(null);
   const rideTimerRef = useRef<NodeJS.Timeout | null>(null);
   const [directions, setDirections] = useState<DirectionsState>({
     route: null, steps: [], currentStepIndex: 0,
@@ -379,6 +381,32 @@ export default function DriverHomePage() {
   useEffect(() => {
     if (!userLoading && !user) router.push('/driver/auth');
   }, [user, userLoading, router]);
+
+  // Wrap completeRide to capture ride data for the summary/rating screen
+  const handleCompleteRide = async () => {
+    if (activeRide) {
+      // Capture ride data BEFORE completing (which deletes active_rides doc)
+      setCompletedRideData({
+        id: activeRide.id,
+        passengerId: activeRide.passengerId,
+        passengerName: activeRide.passengerName,
+        driverId: user?.uid,
+        driverName: activeRide.driverName || user?.displayName || 'Chauffeur',
+        pickup: activeRide.pickup,
+        destination: activeRide.destination,
+        pricing: activeRide.pricing || {
+          base: 3.5, perKmCharge: 0, perMinCharge: 0,
+          distanceKm: activeRide.estimatedDistanceKm || 5,
+          durationMin: activeRide.estimatedDurationMin || 10,
+          surgeMultiplier: 1, subtotal: 0, subtotalWithSurge: 0,
+          tps: 0, tvq: 0, total: activeRide.estimatedPrice || 0,
+          driverEarnings: (activeRide.estimatedPrice || 0) * 0.7,
+        },
+        actualDurationMin: activeRide.actualDurationMin,
+      });
+    }
+    await completeRide();
+  };
 
   const handleToggleOnline = async () => {
     if (isOnline) { await goOffline(); toast({ title: 'Vous etes hors ligne.' }); }
@@ -755,10 +783,27 @@ export default function DriverHomePage() {
           rideTimer={rideTimer}
           onArrive={arrivedAtPickup}
           onStartRide={startRide}
-          onCompleteRide={completeRide}
+          onCompleteRide={handleCompleteRide}
           onNavigate={handleNavigate}
           isCollapsed={panelCollapsed}
           onToggleCollapse={() => setPanelCollapsed(!panelCollapsed)}
+        />
+      )}
+
+      {/* Post-ride Summary / Rating modal */}
+      {completedRideData && !activeRide && (
+        <RideSummary
+          rideId={completedRideData.id}
+          passengerId={completedRideData.passengerId}
+          passengerName={completedRideData.passengerName}
+          driverId={completedRideData.driverId}
+          driverName={completedRideData.driverName}
+          pickup={completedRideData.pickup}
+          destination={completedRideData.destination}
+          pricing={completedRideData.pricing}
+          actualDurationMin={completedRideData.actualDurationMin}
+          userRole="driver"
+          onClose={() => setCompletedRideData(null)}
         />
       )}
 

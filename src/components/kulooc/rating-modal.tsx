@@ -18,6 +18,25 @@ interface RatingModalProps {
   onClose: () => void;
 }
 
+/**
+ * PING: Force-reset a driver's status to 'online' after rating.
+ * This ensures the driver is never stuck in 'en-route' or 'on-trip' after a ride ends.
+ */
+async function pingDriverOnline(driverId: string) {
+  try {
+    await updateDoc(doc(db, 'drivers', driverId), {
+      status: 'online',
+      currentRideId: null,
+      isOnline: true,
+      onlineSince: serverTimestamp(),
+      lastSeen: serverTimestamp(),
+      updatedAt: serverTimestamp(),
+    });
+  } catch (_) {
+    // Silently fail — the completeRide already tried to reset
+  }
+}
+
 const QUICK_COMMENTS_PASSENGER = [
   'Très professionnel', 'Conduite sécuritaire', 'Ponctuel', 'Véhicule propre', 'Agréable'
 ];
@@ -78,6 +97,12 @@ export function RatingModal({
       await updateDoc(doc(db, 'completed_rides', rideId), {
         [field]: { rating, comment: fullComment, ratedAt: serverTimestamp() },
       }).catch(() => {});
+
+      // PING: If the driver just submitted their rating, force-reset to online.
+      // This is the final safety net to ensure the driver never stays stuck in 'en-route'.
+      if (raterRole === 'driver') {
+        await pingDriverOnline(raterId);
+      }
 
       setSubmitted(true);
       setTimeout(onClose, 2000);
@@ -172,7 +197,13 @@ export function RatingModal({
         {/* Boutons */}
         <div className="flex gap-3">
           <button
-            onClick={onClose}
+            onClick={async () => {
+              // Even if skipping rating, ping the driver back online
+              if (raterRole === 'driver') {
+                await pingDriverOnline(raterId);
+              }
+              onClose();
+            }}
             className="flex-1 py-3 rounded-full border-2 border-gray-200 font-semibold text-gray-600"
           >
             Passer

@@ -22,6 +22,7 @@ import {
   doc,
   addDoc,
   updateDoc,
+  deleteDoc,
   serverTimestamp,
   getDoc,
   setDoc,
@@ -120,7 +121,17 @@ export function useDriver(): UseDriverReturn {
         } else if (ride.status === 'in-progress') {
           setDriverStatus('on-trip');
           if (!rideStartTimeRef.current) rideStartTimeRef.current = new Date();
+        } else if (ride.status === 'completed') {
+          // Ride just completed — don't keep en-route/on-trip, go back to online
+          setDriverStatus('online');
         }
+      } else {
+        // No active ride found — if we were en-route or on-trip, reset to online.
+        // This fires when the active_rides doc is deleted after completion.
+        setDriverStatus((prev) => {
+          if (prev === 'en-route' || prev === 'on-trip') return 'online';
+          return prev;
+        });
       }
     });
 
@@ -398,15 +409,24 @@ export function useDriver(): UseDriverReturn {
         }).catch(() => {});
       }
 
-      // 5. Reset driver to online
-      await updateDriverStatus(user.uid, 'online');
+      // 5. CRITICAL: Delete the active_ride doc so the listener stops seeing it.
+      // The data is already saved in completed_rides (step 2).
+      // Without this, subscribeToDriverActiveRide keeps finding the doc and 
+      // re-setting driverStatus to 'en-route' or 'on-trip'.
+      await deleteDoc(doc(db, 'active_rides', activeRide.id)).catch(() => {});
+
+      // 6. Reset driver to online — do this AFTER deleting active_ride
+      // so the listener fires with null and doesn't override our status.
       await updateDoc(doc(db, 'drivers', user.uid), {
         currentRideId: null,
         status: 'online',
+        isOnline: true,
+        onlineSince: serverTimestamp(),
+        lastSeen: serverTimestamp(),
         updatedAt: serverTimestamp(),
       }).catch(() => {});
 
-      // 6. Notify passenger
+      // 7. Notify passenger
       if (rideData.passengerId) {
         await addDoc(collection(db, 'notifications'), {
           userId: rideData.passengerId,

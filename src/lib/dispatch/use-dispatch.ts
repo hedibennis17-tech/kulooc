@@ -47,14 +47,12 @@ export function useDispatch(): UseDispatchReturn {
   const [autoAssigning, setAutoAssigning] = useState<string | null>(null);
 
   // ─── Start the Dispatch Engine (auto-assign pending requests) ────────────
+  // IMPORTANT: Never call engine.stop() here — the engine is a global singleton
+  // shared by driver pages, client pages, and the dispatch dashboard.
+  // Stopping it when one page unmounts kills it for all other pages.
   useEffect(() => {
     const engine = getDispatchEngine(db);
     engine.start();
-    console.log('[v0] Dispatch engine started from useDispatch');
-    return () => {
-      engine.stop();
-      console.log('[v0] Dispatch engine stopped');
-    };
   }, []);
 
   // ─── Écouter les chauffeurs actifs ─────────────────────────────────────────

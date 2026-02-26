@@ -468,8 +468,9 @@ export class DispatchEngine {
   }
 
   /**
-   * Direct auto-assign without offer step.
-   * Used when you want to skip the driver offer flow and just assign directly.
+   * Direct assign from dispatch dashboard.
+   * Creates the active_ride directly (no offer step / no 60s countdown).
+   * The driver's subscribeToDriverActiveRide listener will detect the new ride.
    */
   async directAssign(
     requestId: string,
@@ -477,6 +478,30 @@ export class DispatchEngine {
     driverName: string,
     driverLocation: { latitude: number; longitude: number } | null
   ): Promise<{ success: boolean; error?: string }> {
+    // First, verify the request is still assignable
+    const reqSnap = await getDoc(doc(this.db, 'ride_requests', requestId));
+    if (!reqSnap.exists()) return { success: false, error: 'Demande introuvable' };
+    const reqStatus = reqSnap.data().status;
+    if (!['pending', 'offered', 'searching'].includes(reqStatus)) {
+      return { success: false, error: `Demande deja traitee (status: ${reqStatus})` };
+    }
+
+    // If the request was previously offered to someone else, clear that offer
+    const prevOfferedTo = reqSnap.data().offeredToDriverId;
+    if (prevOfferedTo && prevOfferedTo !== driverId) {
+      await updateDoc(doc(this.db, 'driver_offers', `${requestId}_${prevOfferedTo}`), {
+        status: 'expired',
+      }).catch(() => {});
+    }
+
+    // Clear any pending offer timeout for this request
+    const timeout = this.offerTimeouts.get(requestId);
+    if (timeout) {
+      clearTimeout(timeout);
+      this.offerTimeouts.delete(requestId);
+    }
+
+    // Now accept/assign directly
     return this.acceptOffer(requestId, driverId, driverName, driverLocation);
   }
 }
