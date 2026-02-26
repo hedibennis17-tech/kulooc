@@ -222,12 +222,16 @@ export function useDriver(): UseDriverReturn {
             // Silently fail GPS updates
           }
         },
-        (_err) => {
+        async (_err) => {
           const fallback = {
-            latitude: 45.5631 + (Math.random() - 0.5) * 0.02,
-            longitude: -73.7124 + (Math.random() - 0.5) * 0.02,
+            latitude: 45.5033, // Centre-ville Montréal
+            longitude: -73.5695,
           };
           setCurrentLocation(fallback);
+          // Tenter d'écrire cette position de secours dans Firestore
+          if (user?.uid) {
+            try { await updateDriverLocation(user.uid, fallback); } catch {}
+          }
         },
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
       );
@@ -247,6 +251,18 @@ export function useDriver(): UseDriverReturn {
       await updateDriverStatus(user.uid, 'online');
       setDriverStatus('online');
       localStorage.setItem(LS_KEY, '1');
+      // Obtenir la position GPS immédiatement pour que le moteur trouve ce chauffeur
+      if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+        navigator.geolocation.getCurrentPosition(
+          async (pos) => {
+            const loc = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+            setCurrentLocation(loc);
+            try { await updateDriverLocation(user.uid!, loc); } catch {}
+          },
+          () => { /* Pas de GPS — le moteur utilise distance 5km par défaut */ },
+          { enableHighAccuracy: false, timeout: 5000, maximumAge: 30000 }
+        );
+      }
     } catch (err: any) {
       setError(err.message);
     } finally {
