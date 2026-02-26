@@ -92,7 +92,6 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
           
           // Mettre à jour seulement si c'est une nouvelle offre
           if (!currentOffer || currentOffer.id !== offer.id) {
-            console.log('[useDriverOffer] Polling: Nouvelle offre détectée:', offer.id);
             setCurrentOffer(offer);
 
             if (offer.expiresAt) {
@@ -105,8 +104,8 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
             }
           }
         }
-      } catch (err) {
-        console.error('[useDriverOffer] Polling error:', err);
+      } catch {
+        // Silently fail polling
       }
     };
 

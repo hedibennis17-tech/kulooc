@@ -107,11 +107,9 @@ export function useDriver(): UseDriverReturn {
 
         // Si le chauffeur a une course active, la charger immédiatement
         if (currentRideId) {
-          console.log('[useDriver] currentRideId trouvé au montage:', currentRideId);
           const rideSnap = await getDoc(doc(db, 'active_rides', currentRideId));
           if (!cancelled && rideSnap.exists()) {
             const ride = { id: rideSnap.id, ...rideSnap.data() } as ActiveRide;
-            console.log('[useDriver] Course active chargée:', ride.id, ride.status);
             setActiveRide(ride);
             
             // Mettre à jour le statut en fonction de la course
@@ -132,10 +130,9 @@ export function useDriver(): UseDriverReturn {
           const normalizedStatus = (!currentRideId && (fsStatus === 'en-route' || fsStatus === 'on-trip'))
             ? 'online' : fsStatus;
           setDriverStatus(normalizedStatus);
-          console.log('[useDriver] Statut restauré:', fsStatus, '→', normalizedStatus);
         }
-      } catch (err) {
-        console.error('[useDriver] Erreur sync au montage:', err);
+      } catch {
+        // Silently fail
       }
     };
 
@@ -174,96 +171,76 @@ export function useDriver(): UseDriverReturn {
     return unsub;
   }, [user?.uid]);
 
-  // ─── POLLING FALLBACK — Synchronisation toutes les 15s ────────────────────
-  // FIX CRITIQUE: l'onSnapshot peut échouer silencieusement si l'index Firestore
-  // composite (driverId + status) n'existe pas. Ce polling garantit la synchronisation.
-  // IMPORTANT: On utilise les refs pour éviter de recréer l'intervalle à chaque changement d'état.
+  // ─── POLLING FALLBACK — Synchronisation toutes les 10s ────────────────────
+  // FIX: l'onSnapshot peut échouer si l'index Firestore composite n'existe pas.
+  // Ce polling garantit la synchronisation en vérifiant currentRideId du driver.
   useEffect(() => {
     if (!user?.uid) return;
-
-    console.log('[useDriver] Démarrage du polling fallback (15s)');
 
     const pollActiveRide = async () => {
       const currentActiveRide = activeRideRef.current;
       const currentDriverStatus = driverStatusRef.current;
       
       try {
-        // 1. TOUJOURS vérifier currentRideId dans le document drivers (pas d'index requis)
         const driverSnap = await getDoc(doc(db, 'drivers', user.uid));
-        if (!driverSnap.exists()) {
-          console.log('[useDriver] Polling: Document driver introuvable');
-          return;
-        }
+        if (!driverSnap.exists()) return;
         
         const data = driverSnap.data();
         const currentRideId = data?.currentRideId;
         
-        console.log('[useDriver] Polling: currentRideId=', currentRideId, 'localRideId=', currentActiveRide?.id);
-        
         // Cas 1: Le chauffeur a un currentRideId dans Firestore
         if (currentRideId) {
-          // Vérifier si on a déjà cette course en local avec le bon ID
           if (currentActiveRide?.id === currentRideId) {
-            // Rafraîchir quand même pour avoir le statut à jour
+            // Rafraîchir pour avoir le statut à jour
             const rideSnap = await getDoc(doc(db, 'active_rides', currentRideId));
             if (rideSnap.exists()) {
               const ride = { id: rideSnap.id, ...rideSnap.data() } as ActiveRide;
-              // Mettre à jour seulement si le statut a changé
               if (ride.status !== currentActiveRide.status) {
-                console.log('[useDriver] Polling: Statut mis à jour:', currentActiveRide.status, '→', ride.status);
                 setActiveRide(ride);
               }
             }
             return;
           }
           
-          // On a un nouveau rideId dans Firestore mais pas en local - LE CHARGER!
-          console.log('[useDriver] Polling: NOUVELLE course détectée! Chargement...');
+          // Nouvelle course détectée - la charger
           const rideSnap = await getDoc(doc(db, 'active_rides', currentRideId));
           if (rideSnap.exists()) {
             const ride = { id: rideSnap.id, ...rideSnap.data() } as ActiveRide;
-            console.log('[useDriver] Polling: Course chargée:', ride.id, 'status=', ride.status);
             setActiveRide(ride);
             if (ride.status === 'driver-assigned' || ride.status === 'driver-arrived') {
               setDriverStatus('en-route');
             } else if (ride.status === 'in-progress') {
               setDriverStatus('on-trip');
             }
-          } else {
-            console.log('[useDriver] Polling: Document active_rides introuvable pour', currentRideId);
           }
           return;
         }
         
-        // Cas 2: Pas de currentRideId dans Firestore mais on a une course locale → la nettoyer si terminée
+        // Cas 2: Pas de currentRideId mais course locale → nettoyer si terminée
         if (!currentRideId && currentActiveRide) {
-          // Vérifier si la course existe encore et son statut
           const rideSnap = await getDoc(doc(db, 'active_rides', currentActiveRide.id!));
           if (!rideSnap.exists() || rideSnap.data()?.status === 'completed') {
-            console.log('[useDriver] Polling: Course terminée ou supprimée, nettoyage');
             setActiveRide(null);
             if (currentDriverStatus !== 'offline') {
               setDriverStatus('online');
             }
           }
         }
-      } catch (err) {
-        console.error('[useDriver] Polling error:', err);
+      } catch {
+        // Silently fail polling
       }
     };
 
     // Poll immédiatement, puis après 3s, puis toutes les 10 secondes
-    // Les 2 premiers polls rapides garantissent une détection rapide au chargement
     pollActiveRide();
     const quickPoll = setTimeout(pollActiveRide, 3000);
     const interval = setInterval(pollActiveRide, 10000);
 
     return () => {
-      console.log('[useDriver] Arrêt du polling fallback');
       clearTimeout(quickPoll);
       clearInterval(interval);
     };
-  }, [user?.uid]); // IMPORTANT: Seul user?.uid comme dépendance!
+  }, [user?.uid]);
 
   // ─── Timer en ligne ───────────────────────────────────────────────────────
   useEffect(() => {

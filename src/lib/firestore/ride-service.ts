@@ -254,7 +254,6 @@ export function subscribeToDriverActiveRide(
       if (!snap.empty) {
         const d = snap.docs[0];
         const ride = { id: d.id, ...d.data() } as ActiveRide;
-        console.log('[subscribeToDriverActiveRide] Course reçue:', ride.id, ride.status);
 
         if (ride.status === 'completed') {
           const completedAt = (ride.rideCompletedAt || ride.completedAt) as Timestamp | undefined;
@@ -271,16 +270,12 @@ export function subscribeToDriverActiveRide(
           callback(ride);
         }
       } else {
-        console.log('[subscribeToDriverActiveRide] Aucune course active pour', driverId);
         callback(null);
       }
     },
-    (error) => {
-      // ERREUR CRITIQUE: L'index Firestore composite peut être manquant
-      // Cela ne bloque PAS l'app grâce au polling fallback dans use-driver.ts
-      console.error('[subscribeToDriverActiveRide] ERREUR onSnapshot:', error.message);
-      console.error('[subscribeToDriverActiveRide] Si l\'erreur mentionne "index", créer l\'index composite: driverId + status');
-      // Ne pas appeler callback(null) ici pour ne pas écraser une course existante
+    () => {
+      // Index Firestore composite peut être manquant
+      // Le polling fallback dans use-driver.ts compense cette erreur
     }
   );
 }

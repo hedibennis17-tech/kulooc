@@ -361,7 +361,6 @@ export default function DriverHomePage() {
               <div className="bg-gray-50 rounded-2xl p-4 flex items-center justify-between mb-4">
                 <div>
                   <p className="text-3xl font-black text-green-600">{fmtMoney(currentOffer.estimatedPrice)}</p>
-                  <p className="text-xs text-green-500 font-bold">Votre gain: {fmtMoney((currentOffer.estimatedPrice || 0) * 0.70)}</p>
                   <p className="text-sm text-gray-500 mt-0.5">
                     {currentOffer.estimatedDistanceKm?.toFixed(1)} km · ~{currentOffer.estimatedDurationMin} min
                   </p>
