@@ -17,10 +17,24 @@ import { useRealtime } from '@/lib/realtime/use-realtime';
 import type { DispatchDriver, RideRequest } from '@/lib/dispatch/types';
 import { useToast } from '@/hooks/use-toast';
 import { Zap, Users, Car, Activity } from 'lucide-react';
+import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
+import { db } from '@/firebase';
 
 export default function DispatcherDashboardPage() {
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? '';
   const { toast } = useToast();
+
+  // ─── DASHBOARD EN VEILLE PERMANENTE ─────────────────────────────────────────
+  // Le moteur démarre dès l'ouverture du dashboard, sans attendre un chauffeur.
+  // Il reste actif et répond aux commandes client 24/7 tant que la page est ouverte.
+  const dashEngineRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!dashEngineRef.current) {
+      getDispatchEngine(db).start();
+      dashEngineRef.current = true;
+      console.log('[dashboard] Moteur dispatch actif — mode veille permanente');
+    }
+  }, []);
 
   // ─── useDispatch : données existantes (drivers, rides, requests) ────────────
   const {
