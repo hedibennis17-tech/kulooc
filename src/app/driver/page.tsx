@@ -1,7 +1,7 @@
 'use client';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useRouter } from 'next/navigation';
-import { Shield, SlidersHorizontal, TrendingUp, Plane, MapPin, Navigation, Star, Phone, ChevronUp, ChevronDown, X, Volume2, ArrowUp, ArrowLeft, ArrowRight, CornerUpLeft, CornerUpRight, RotateCcw } from 'lucide-react';
+import { Shield, SlidersHorizontal, TrendingUp, Plane, MapPin, Navigation, Star, Phone, ChevronUp, ChevronDown, X, Volume2, ArrowUp, ArrowLeft, ArrowRight, CornerUpLeft, CornerUpRight, RotateCcw, Home, DollarSign, Mail, Menu } from 'lucide-react';
 import { useUser } from '@/firebase/provider';
 import { useDriver } from '@/lib/firestore/use-driver';
 import { useDriverOffer } from '@/lib/firestore/use-driver-offer';
@@ -87,7 +87,7 @@ function stripHtml(html: string) {
   return html.replace(/<[^>]*>/g, '');
 }
 
-// Compact Turn-by-Turn Navigation Bar (Uber-inspired) -- now with real directions data
+// Turn-by-Turn Navigation Bar matching the design from image 1
 function NavigationBar({
   destination,
   distanceKm,
@@ -114,37 +114,45 @@ function NavigationBar({
 
   return (
     <div className="absolute top-0 left-0 right-0 z-30">
-      {/* Compact nav instruction bar */}
-      <div className="bg-red-700 text-white px-4 pt-10 pb-3">
-        <div className="flex items-center gap-3">
-          <div className="flex-shrink-0">
+      {/* Main instruction card -- dark semi-transparent */}
+      <div className="mx-3 mt-10 rounded-2xl bg-gray-900/95 backdrop-blur text-white p-4 shadow-2xl">
+        <div className="flex items-start gap-4">
+          {/* Direction arrow in a red square */}
+          <div className="flex-shrink-0 w-14 h-14 rounded-xl bg-red-600 flex items-center justify-center">
             {getStepIcon(maneuver)}
           </div>
+          {/* Instruction text */}
           <div className="flex-1 min-w-0">
-            <p className="font-bold text-sm leading-tight">{instruction}</p>
-            <p className="text-white/70 text-xs mt-0.5">{stepDistance}</p>
+            <p className="text-2xl font-black leading-tight">{stepDistance || '--'}</p>
+            <p className="text-sm text-white/80 mt-1 leading-snug">{instruction}</p>
           </div>
-          <button
-            onClick={onHide}
-            className="p-2 hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
-            title="Masquer la navigation"
-          >
-            <X className="w-4 h-4" />
+          {/* Audio button */}
+          <button className="p-2 hover:bg-white/10 rounded-full transition-colors flex-shrink-0 mt-1">
+            <Volume2 className="w-5 h-5 text-white/60" />
           </button>
         </div>
       </div>
 
-      {/* ETA bar */}
-      <div className="bg-red-800 text-white px-4 py-2 flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <span className="font-bold text-sm">
+      {/* ETA bar -- below the instruction card */}
+      <div className="mx-3 mt-2 rounded-xl bg-red-700 text-white px-4 py-2.5 flex items-center justify-between shadow-lg">
+        <div className="flex items-center gap-3">
+          <span className="text-lg font-black">
             {durationMin ? `${Math.round(durationMin)} min` : '--'}
           </span>
-          <span className="text-white/60 text-xs">
+          <span className="text-white/50">|</span>
+          <span className="text-sm text-white/70 font-semibold">
             {distanceKm ? `${distanceKm.toFixed(1)} km` : '--'}
           </span>
         </div>
-        <p className="text-xs text-white/80 truncate max-w-[50%] text-right">{destination}</p>
+        <div className="flex items-center gap-2">
+          <p className="text-sm text-white/80 font-medium truncate max-w-[140px]">{destination}</p>
+          <button
+            onClick={onHide}
+            className="p-1 hover:bg-white/10 rounded-full transition-colors flex-shrink-0"
+          >
+            <X className="w-4 h-4 text-white/60" />
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -293,11 +301,6 @@ function RideInfoPanel({
           )}
         </div>
 
-        {/* GPS active indicator */}
-        <div className="bg-red-50 px-4 py-2 flex items-center justify-center gap-2">
-          <div className="w-2 h-2 bg-red-600 rounded-full animate-pulse" />
-          <span className="text-xs text-red-700 font-medium">GPS actif -- Navigation en cours</span>
-        </div>
       </div>
 
       {/* Bottom nav */}
@@ -307,25 +310,30 @@ function RideInfoPanel({
 }
 
 function BottomNav() {
+  const items = [
+    { label: 'Accueil', Icon: Home, active: true },
+    { label: 'Revenus', Icon: DollarSign, active: false },
+    { label: 'Boite de recep.', Icon: Mail, active: false },
+    { label: 'Menu', Icon: Menu, active: false },
+  ];
   return (
     <nav className="bg-white border-t border-gray-100">
-      <div className="grid grid-cols-4 h-14">
-        {[
-          { label: 'Accueil', icon: '/' , active: true },
-          { label: 'Revenus', icon: '$' },
-          { label: 'Boite de recep.', icon: 'M' },
-          { label: 'Menu', icon: '=' },
-        ].map((item, i) => (
+      <div className="grid grid-cols-4 h-16">
+        {items.map((item) => (
           <button
-            key={i}
+            key={item.label}
             className={cn(
-              'flex flex-col items-center justify-center gap-0.5',
-              item.active ? 'text-red-600' : 'text-gray-400'
+              'flex flex-col items-center justify-center gap-1 relative',
+              item.active ? 'text-gray-900' : 'text-gray-400'
             )}
           >
-            <span className="text-xs font-bold">{item.icon}</span>
-            <span className="text-[9px]">{item.label}</span>
-            {item.active && <div className="w-1 h-1 rounded-full bg-green-500 absolute top-1" />}
+            <div className="relative">
+              <item.Icon className="w-5 h-5" />
+              {item.active && (
+                <div className="absolute -top-0.5 -right-1.5 w-2 h-2 rounded-full bg-green-500" />
+              )}
+            </div>
+            <span className="text-[10px] font-medium">{item.label}</span>
           </button>
         ))}
       </div>
@@ -424,11 +432,19 @@ export default function DriverHomePage() {
   };
 
   // Fetch directions from Google Maps Directions API (in-app, not external)
+  // Retries if google.maps is not yet loaded (script may still be loading)
   const fetchDirections = useCallback((
     origin: { lat: number; lng: number },
-    dest: { lat: number; lng: number }
+    dest: { lat: number; lng: number },
+    retryCount = 0
   ) => {
-    if (!window.google?.maps) return;
+    if (!window.google?.maps) {
+      // Retry up to 10 times (5 seconds total) waiting for Maps to load
+      if (retryCount < 10) {
+        setTimeout(() => fetchDirections(origin, dest, retryCount + 1), 500);
+      }
+      return;
+    }
     if (!directionsServiceRef.current) {
       directionsServiceRef.current = new google.maps.DirectionsService();
     }
@@ -532,23 +548,24 @@ export default function DriverHomePage() {
               gestureHandling="greedy"
               className="w-full h-full"
             >
-              {/* Driver position - Red triangle for navigation */}
+              {/* Driver position - Gray compass/triangle icon (Uber-style) */}
               {currentLocation && (
                 <AdvancedMarker
                   position={{ lat: currentLocation.latitude, lng: currentLocation.longitude }}
                   title="Votre position"
                 >
                   <div className="relative flex items-center justify-center">
-                    <div className="absolute w-12 h-12 rounded-full bg-red-500/20 animate-ping" />
-                    {/* Navigation triangle */}
-                    <svg width="28" height="28" viewBox="0 0 28 28" className="drop-shadow-lg">
-                      <polygon
-                        points="14,2 24,24 14,18 4,24"
-                        fill="#DC2626"
-                        stroke="white"
-                        strokeWidth="2"
-                      />
-                    </svg>
+                    {/* Outer ring - subtle pulse */}
+                    <div className="absolute w-14 h-14 rounded-full bg-gray-400/15 animate-pulse" />
+                    {/* Gray circle with triangle compass */}
+                    <div className="w-10 h-10 rounded-full bg-gray-700 border-[3px] border-white shadow-xl flex items-center justify-center">
+                      <svg width="18" height="18" viewBox="0 0 18 18">
+                        <polygon
+                          points="9,1 16,15 9,11 2,15"
+                          fill="white"
+                        />
+                      </svg>
+                    </div>
                   </div>
                 </AdvancedMarker>
               )}
@@ -589,7 +606,7 @@ export default function DriverHomePage() {
       </div>
 
       {/* Turn-by-turn Navigation Bar (on active ride, with real directions) */}
-      {activeRide && (
+      {activeRide && navBarVisible && (
         <NavigationBar
           destination={
             activeRide.status === 'in-progress'
@@ -601,7 +618,7 @@ export default function DriverHomePage() {
           steps={directions.steps}
           currentStepIndex={directions.currentStepIndex}
           onHide={() => setNavBarVisible(false)}
-          isVisible={navBarVisible}
+          isVisible={true}
         />
       )}
 
@@ -774,6 +791,27 @@ export default function DriverHomePage() {
             </div>
           </SheetContent>
         </Sheet>
+      )}
+
+      {/* GPS active block - overlaid on the map above the info panel (Uber-style) */}
+      {activeRide && isOnline && (
+        <div className="absolute bottom-[260px] left-0 right-0 z-[15] flex items-center justify-center pointer-events-none">
+          <div className="bg-white/90 backdrop-blur-sm rounded-full px-5 py-2.5 shadow-lg flex items-center gap-3 pointer-events-auto">
+            {/* Gray compass triangle icon */}
+            <div className="w-8 h-8 rounded-full bg-gray-600 flex items-center justify-center">
+              <svg width="14" height="14" viewBox="0 0 14 14">
+                <polygon points="7,1 12,12 7,9 2,12" fill="white" />
+              </svg>
+            </div>
+            <div className="flex flex-col">
+              <span className="text-xs font-semibold text-gray-800">GPS actif</span>
+              <span className="text-[10px] text-gray-500">Navigation en cours</span>
+            </div>
+            {directions.isActive && (
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse ml-1" />
+            )}
+          </div>
+        </div>
       )}
 
       {/* Active ride panel (compact, not full sheet) */}
