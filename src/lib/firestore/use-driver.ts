@@ -67,7 +67,13 @@ export type UseDriverReturn = {
 
 const ONLINE_STATUSES: DriverStatus[] = ['online', 'en-route', 'on-trip', 'busy'];
 const LS_KEY = 'kulooc_driver_online';
+const SESSION_KEY = 'kulooc_driver_session';
 const HEARTBEAT_MS = 30_000;
+
+// Generer un ID de session unique pour cet onglet
+const SESSION_ID = typeof window !== 'undefined' 
+  ? `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`
+  : '';
 
 export function useDriver(): UseDriverReturn {
   const { user } = useUser();
@@ -128,6 +134,13 @@ export function useDriver(): UseDriverReturn {
     }
     const beat = async () => {
       if (!user?.uid) return;
+      // Verifier si cette session est toujours la session active
+      const currentSession = localStorage.getItem(SESSION_KEY);
+      if (currentSession && currentSession !== SESSION_ID) {
+        // Une autre session a pris le relais - arreter ce heartbeat
+        if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+        return;
+      }
       try {
         await updateDoc(doc(db, 'drivers', user.uid), {
           status: driverStatus,
@@ -244,6 +257,15 @@ export function useDriver(): UseDriverReturn {
     if (!user?.uid) return;
     setIsLoading(true);
     try {
+      // Verifier si une autre session est deja active
+      const existingSession = localStorage.getItem(SESSION_KEY);
+      if (existingSession && existingSession !== SESSION_ID) {
+        // Une autre session existe - la remplacer
+        localStorage.setItem(SESSION_KEY, SESSION_ID);
+      } else {
+        localStorage.setItem(SESSION_KEY, SESSION_ID);
+      }
+
       // Obtenir la position GPS actuelle ou utiliser un fallback (region Montreal)
       let locationToUse = currentLocation;
       if (!locationToUse && typeof navigator !== 'undefined' && 'geolocation' in navigator) {
@@ -272,18 +294,24 @@ export function useDriver(): UseDriverReturn {
 
   const goOffline = useCallback(async () => {
     if (!user?.uid) return;
+    // IMPORTANT: Empecher la deconnexion si une course est en cours
+    if (activeRide && !['completed', 'cancelled'].includes(activeRide.status)) {
+      setError('Impossible de se deconnecter pendant une course en cours');
+      return;
+    }
     setIsLoading(true);
     try {
       await updateDriverStatus(user.uid, 'offline', null);
       setDriverStatus('offline');
       setPendingRequests([]);
       localStorage.removeItem(LS_KEY);
+      localStorage.removeItem(SESSION_KEY);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setIsLoading(false);
     }
-  }, [user?.uid]);
+  }, [user?.uid, activeRide]);
 
   /**
    * Accepter une course — délègue UNIQUEMENT au Dispatch Engine.

@@ -40,25 +40,37 @@ function getElapsedTime(date: Date | any): string {
   return `${Math.floor(seconds / 3600)}h`;
 }
 
+// Helper pour obtenir la position du chauffeur (meme logique que dispatch-engine)
+function getDriverLoc(d: DispatchDriver): { latitude: number; longitude: number } | null {
+  const loc = d.location || d.currentLocation;
+  if (!loc) return null;
+  if (typeof loc.latitude === 'number' && typeof loc.longitude === 'number') {
+    return { latitude: loc.latitude, longitude: loc.longitude };
+  }
+  if (typeof (loc as any)._lat === 'number' && typeof (loc as any)._long === 'number') {
+    return { latitude: (loc as any)._lat, longitude: (loc as any)._long };
+  }
+  return null;
+}
+
 function getBestDrivers(request: RideRequest, drivers: DispatchDriver[], top = 3) {
   // Filtrer uniquement les chauffeurs VRAIMENT disponibles
-  // - statut 'online' (pas en-route, on-trip, busy, offline)
-  // - a une position GPS
-  // - PAS de course en cours (currentRideId null/undefined/empty)
   const available = drivers.filter((d) => {
-    const isOnline = d.status === 'online';
-    const hasLocation = !!(d.currentLocation || d.location);
-    const noActiveRide = !d.currentRideId || d.currentRideId === '';
+    const statusStr = String(d.status || '').toLowerCase();
+    const isOnline = statusStr === 'online';
+    const hasLocation = !!getDriverLoc(d);
+    const noActiveRide = !d.currentRideId || d.currentRideId === '' || d.currentRideId === 'null';
     return isOnline && hasLocation && noActiveRide;
   });
 
   return available
     .map((driver) => {
-      const driverLoc = driver.currentLocation ?? driver.location;
+      const driverLoc = getDriverLoc(driver);
+      if (!driverLoc) return null;
       const pickupLat = request.pickup.location?.latitude ?? request.pickup.latitude ?? 45.5;
       const pickupLng = request.pickup.location?.longitude ?? request.pickup.longitude ?? -73.5;
       const distKm = haversineDistance(
-        { latitude: driverLoc!.latitude, longitude: driverLoc!.longitude },
+        { latitude: driverLoc.latitude, longitude: driverLoc.longitude },
         { latitude: pickupLat, longitude: pickupLng }
       );
       const etaSec = (distKm / 30) * 3600; // 30 km/h average urban speed
@@ -70,6 +82,7 @@ function getBestDrivers(request: RideRequest, drivers: DispatchDriver[], top = 3
       });
       return { driver, distKm, etaSec, score: score.total };
     })
+    .filter((x): x is NonNullable<typeof x> => x !== null)
     .sort((a, b) => b.score - a.score)
     .slice(0, top);
 }

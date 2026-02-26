@@ -324,8 +324,7 @@ export async function updateDriverStatus(
 
   if (status === 'online') {
     updates.onlineSince = serverTimestamp();
-    // IMPORTANT: Si une location est fournie, la mettre a jour
-    // Sinon, garder la location existante (ne pas ecraser avec null)
+    // Si une location est fournie, la mettre a jour
     if (currentLocation) {
       updates.location = currentLocation;
     }
@@ -334,12 +333,11 @@ export async function updateDriverStatus(
       updates.name = driverName;
       updates.driverName = driverName;
     }
-    // S'assurer que currentRideId est null quand online (disponible)
-    updates.currentRideId = null;
+    // NOTE: Ne PAS mettre currentRideId = null ici car ca peut casser une course en cours
+    // Le nettoyage de currentRideId se fait dans completeRide() uniquement
   }
   if (status === 'offline') {
     updates.onlineSince = null;
-    updates.currentRideId = null; // Nettoyer aussi currentRideId
     // Ne pas supprimer location pour permettre la reconnexion rapide
   }
 

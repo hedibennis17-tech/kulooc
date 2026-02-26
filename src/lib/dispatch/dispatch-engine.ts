@@ -67,8 +67,22 @@ export interface DispatchRequest {
 // ─── Helper pour obtenir la position du chauffeur ────────────────────────────
 function getDriverLocation(d: DispatchDriver): { latitude: number; longitude: number } | null {
   // Supporte les deux formats: 'location' et 'currentLocation'
-  if (d.location?.latitude && d.location?.longitude) return d.location;
-  if ((d as any).currentLocation?.latitude && (d as any).currentLocation?.longitude) return (d as any).currentLocation;
+  // Aussi supporte GeoPoint de Firestore (_lat, _long)
+  const loc = d.location || (d as any).currentLocation;
+  if (!loc) return null;
+  
+  // Format standard { latitude, longitude }
+  if (typeof loc.latitude === 'number' && typeof loc.longitude === 'number') {
+    return { latitude: loc.latitude, longitude: loc.longitude };
+  }
+  // Format GeoPoint Firestore { _lat, _long }
+  if (typeof loc._lat === 'number' && typeof loc._long === 'number') {
+    return { latitude: loc._lat, longitude: loc._long };
+  }
+  // Format GeoPoint avec getter
+  if (typeof loc.latitude === 'function') {
+    return { latitude: loc.latitude(), longitude: loc.longitude() };
+  }
   return null;
 }
 
@@ -78,14 +92,15 @@ function selectBestDriver(
   drivers: DispatchDriver[],
   maxRadiusKm = 30
 ): DispatchDriver | null {
-  // CORRIGE: Un chauffeur est disponible si:
-  // - statut 'online' (pas 'en-route', 'on-trip', 'busy', 'offline')
+  // Un chauffeur est disponible si:
+  // - statut 'online' (string exact - pas 'en-route', 'on-trip', 'busy', 'offline')
   // - a une position GPS valide (location OU currentLocation)
   // - n'a PAS de course en cours (currentRideId null/undefined/empty)
   const available = drivers.filter((d) => {
-    const isOnline = d.status === 'online';
+    const statusStr = String(d.status || '').toLowerCase();
+    const isOnline = statusStr === 'online';
     const hasLocation = !!getDriverLocation(d);
-    const noActiveRide = !d.currentRideId || d.currentRideId === '';
+    const noActiveRide = !d.currentRideId || d.currentRideId === '' || d.currentRideId === 'null';
     return isOnline && hasLocation && noActiveRide;
   });
   if (available.length === 0) return null;
