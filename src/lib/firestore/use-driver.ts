@@ -30,6 +30,10 @@ import {
   serverTimestamp,
   getDoc,
   setDoc,
+  query,
+  where,
+  getDocs,
+  limit,
 } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { calculateFare } from '@/lib/services/fare-service';
@@ -81,24 +85,59 @@ export function useDriver(): UseDriverReturn {
   // ─── SYNC STATUT AU MONTAGE ────────────────────────────────────────────────
   // FIX CRITIQUE: useState('offline') remet TOUJOURS le chauffeur offline lors
   // d'un changement de page (re-montage du hook). On lit Firestore au boot
-  // pour restaurer le vrai statut.
+  // pour restaurer le vrai statut ET la course active.
   useEffect(() => {
     if (!user?.uid) return;
     let cancelled = false;
-    getDoc(doc(db, 'drivers', user.uid)).then((snap) => {
-      if (cancelled || !snap.exists()) return;
-      const data = snap.data();
-      const fsStatus = data?.status as DriverStatus | undefined;
-      if (fsStatus && fsStatus !== 'offline') {
-        // Normaliser: en-route/on-trip → online si pas de course active
-        const normalizedStatus = (!data?.currentRideId && (fsStatus === 'en-route' || fsStatus === 'on-trip'))
-          ? 'online' : fsStatus;
-        setDriverStatus(normalizedStatus);
-        console.log('[useDriver] Statut restauré:', fsStatus, '→', normalizedStatus);
+
+    const syncDriverState = async () => {
+      try {
+        const driverSnap = await getDoc(doc(db, 'drivers', user.uid));
+        if (cancelled || !driverSnap.exists()) return;
+        
+        const data = driverSnap.data();
+        const fsStatus = data?.status as DriverStatus | undefined;
+        const currentRideId = data?.currentRideId;
+
+        // Restaurer les compteurs
+        if (typeof data?.earningsToday === 'number') setEarningsToday(data.earningsToday);
+        if (typeof data?.ridesCompleted === 'number') setRidesCompleted(data.ridesCompleted);
+
+        // Si le chauffeur a une course active, la charger immédiatement
+        if (currentRideId) {
+          console.log('[useDriver] currentRideId trouvé au montage:', currentRideId);
+          const rideSnap = await getDoc(doc(db, 'active_rides', currentRideId));
+          if (!cancelled && rideSnap.exists()) {
+            const ride = { id: rideSnap.id, ...rideSnap.data() } as ActiveRide;
+            console.log('[useDriver] Course active chargée:', ride.id, ride.status);
+            setActiveRide(ride);
+            
+            // Mettre à jour le statut en fonction de la course
+            if (ride.status === 'driver-assigned' || ride.status === 'driver-arrived') {
+              setDriverStatus('en-route');
+            } else if (ride.status === 'in-progress') {
+              setDriverStatus('on-trip');
+            } else if (ride.status === 'completed') {
+              setDriverStatus('online');
+            }
+            return; // On a trouvé et chargé la course
+          }
+        }
+
+        // Pas de course active - restaurer juste le statut
+        if (fsStatus && fsStatus !== 'offline') {
+          // Normaliser: en-route/on-trip → online si pas de course active
+          const normalizedStatus = (!currentRideId && (fsStatus === 'en-route' || fsStatus === 'on-trip'))
+            ? 'online' : fsStatus;
+          setDriverStatus(normalizedStatus);
+          console.log('[useDriver] Statut restauré:', fsStatus, '→', normalizedStatus);
+        }
+      } catch (err) {
+        console.error('[useDriver] Erreur sync au montage:', err);
       }
-      if (typeof data?.earningsToday === 'number') setEarningsToday(data.earningsToday);
-      if (typeof data?.ridesCompleted === 'number') setRidesCompleted(data.ridesCompleted);
-    }).catch(() => {});
+    };
+
+    syncDriverState();
     return () => { cancelled = true; };
   }, [user?.uid]);
 
@@ -132,6 +171,68 @@ export function useDriver(): UseDriverReturn {
     });
     return unsub;
   }, [user?.uid]);
+
+  // ─── POLLING FALLBACK — Synchronisation toutes les 30s ────────────────────
+  // Corrige le problème où onSnapshot échoue silencieusement si l'index Firestore
+  // composite (driverId + status) n'existe pas ou si le réseau a des problèmes.
+  useEffect(() => {
+    if (!user?.uid || !isOnline) return;
+
+    const pollActiveRide = async () => {
+      try {
+        // 1. Vérifier currentRideId dans le document drivers
+        const driverSnap = await getDoc(doc(db, 'drivers', user.uid));
+        if (driverSnap.exists()) {
+          const data = driverSnap.data();
+          const currentRideId = data?.currentRideId;
+          
+          if (currentRideId && !activeRide) {
+            // On a un rideId mais pas de activeRide local — le récupérer
+            const rideSnap = await getDoc(doc(db, 'active_rides', currentRideId));
+            if (rideSnap.exists()) {
+              const ride = { id: rideSnap.id, ...rideSnap.data() } as ActiveRide;
+              console.log('[useDriver] Polling: Course trouvée via currentRideId:', ride.id, ride.status);
+              setActiveRide(ride);
+              if (ride.status === 'driver-assigned' || ride.status === 'driver-arrived') {
+                setDriverStatus('en-route');
+              } else if (ride.status === 'in-progress') {
+                setDriverStatus('on-trip');
+              }
+              return; // On a trouvé la course
+            }
+          }
+        }
+
+        // 2. Fallback: query active_rides par driverId
+        const q = query(
+          collection(db, 'active_rides'),
+          where('driverId', '==', user.uid),
+          where('status', 'in', ['driver-assigned', 'driver-arrived', 'in-progress']),
+          limit(1)
+        );
+        const snap = await getDocs(q);
+        
+        if (!snap.empty && !activeRide) {
+          const ride = { id: snap.docs[0].id, ...snap.docs[0].data() } as ActiveRide;
+          console.log('[useDriver] Polling: Course trouvée via query:', ride.id, ride.status);
+          setActiveRide(ride);
+          if (ride.status === 'driver-assigned' || ride.status === 'driver-arrived') {
+            setDriverStatus('en-route');
+          } else if (ride.status === 'in-progress') {
+            setDriverStatus('on-trip');
+          }
+        }
+      } catch (err) {
+        console.error('[useDriver] Polling error:', err);
+      }
+    };
+
+    // Poll immédiatement puis toutes les 30 secondes
+    pollActiveRide();
+    const interval = setInterval(pollActiveRide, 30000);
+
+    return () => clearInterval(interval);
+  }, [user?.uid, isOnline, activeRide]);
 
   // ─── Timer en ligne ───────────────────────────────────────────────────────
   useEffect(() => {

@@ -158,10 +158,17 @@ async function dispatchPending(specificRequestId?: string) {
   return { processed, driversAvailable: available.length, totalDrivers: drSnap.size };
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  // Vercel Cron jobs send this header for authentication
+  const authHeader = req.headers.get('authorization');
+  const isCron = authHeader === `Bearer ${process.env.CRON_SECRET}`;
+  
+  // Log cron execution for monitoring
+  console.log(`[dispatch GET] Cron=${isCron} at ${new Date().toISOString()}`);
+
   try {
     const result = await dispatchPending();
-    return NextResponse.json({ ...result, ts: new Date().toISOString() });
+    return NextResponse.json({ ...result, cron: isCron, ts: new Date().toISOString() });
   } catch (e: any) {
     console.error('[dispatch GET] Error:', e.message);
     return NextResponse.json({ error: e.message }, { status: 500 });

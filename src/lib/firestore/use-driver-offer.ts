@@ -7,7 +7,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import {
   collection, query, where, onSnapshot, doc,
-  updateDoc, serverTimestamp, getDoc, Timestamp,
+  updateDoc, serverTimestamp, getDoc, Timestamp, getDocs, limit,
 } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { useUser } from '@/firebase/provider';
@@ -70,6 +70,48 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
 
     return () => unsub();
   }, [user?.uid]);
+
+  // ─── POLLING FALLBACK — Vérifier les offres toutes les 30s ─────────────────
+  // Corrige le problème où onSnapshot échoue silencieusement
+  useEffect(() => {
+    if (!user?.uid) return;
+
+    const pollOffers = async () => {
+      try {
+        const q = query(
+          collection(db, 'driver_offers'),
+          where('driverId', '==', user.uid),
+          where('status', '==', 'pending'),
+          limit(1)
+        );
+        const snap = await getDocs(q);
+
+        if (!snap.empty && !currentOffer) {
+          const offerDoc = snap.docs[0];
+          const offer = { id: offerDoc.id, ...offerDoc.data() } as DriverOffer;
+          console.log('[useDriverOffer] Polling: Offre trouvée:', offer.id);
+          setCurrentOffer(offer);
+
+          if (offer.expiresAt) {
+            const remaining = Math.max(0, Math.floor(
+              (offer.expiresAt.toMillis() - Date.now()) / 1000
+            ));
+            setCountdown(remaining);
+          } else {
+            setCountdown(60);
+          }
+        }
+      } catch (err) {
+        console.error('[useDriverOffer] Polling error:', err);
+      }
+    };
+
+    // Poll immédiatement puis toutes les 30 secondes
+    pollOffers();
+    const interval = setInterval(pollOffers, 30000);
+
+    return () => clearInterval(interval);
+  }, [user?.uid, currentOffer]);
 
   // Timer countdown
   useEffect(() => {
