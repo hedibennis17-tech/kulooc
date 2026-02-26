@@ -142,11 +142,18 @@ export function useDriver(): UseDriverReturn {
         return;
       }
       try {
-        await updateDoc(doc(db, 'drivers', user.uid), {
+        // ROBUSTE: Mettre a jour la position GPS avec chaque heartbeat
+        const updates: Record<string, unknown> = {
           status: driverStatus,
+          isOnline: true,
           lastHeartbeat: serverTimestamp(),
           updatedAt: serverTimestamp(),
-        });
+        };
+        // Ajouter la location si disponible
+        if (currentLocation) {
+          updates.location = currentLocation;
+        }
+        await updateDoc(doc(db, 'drivers', user.uid), updates);
       } catch {
         // Silently fail
       }
@@ -157,7 +164,7 @@ export function useDriver(): UseDriverReturn {
       if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOnline, user?.uid, driverStatus]);
+  }, [isOnline, user?.uid, driverStatus, currentLocation]);
 
   // ── Sync localStorage ─────────────────────────────────────────────────────
   useEffect(() => {
@@ -266,9 +273,11 @@ export function useDriver(): UseDriverReturn {
         localStorage.setItem(SESSION_KEY, SESSION_ID);
       }
 
-      // Obtenir la position GPS actuelle ou utiliser un fallback (region Montreal)
-      let locationToUse = currentLocation;
-      if (!locationToUse && typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+      // ROBUSTE: Toujours obtenir une position GPS valide
+      let locationToUse: { latitude: number; longitude: number } | null = currentLocation;
+      
+      // Essayer d'obtenir la position GPS actuelle
+      if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
         try {
           const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
             navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
@@ -276,9 +285,16 @@ export function useDriver(): UseDriverReturn {
           locationToUse = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
           setCurrentLocation(locationToUse);
         } catch {
-          // Fallback: position par defaut Montreal/Laval si GPS echoue
-          locationToUse = { latitude: 45.5631, longitude: -73.7124 };
+          // Si GPS echoue, garder currentLocation ou utiliser fallback
+          if (!locationToUse) {
+            locationToUse = { latitude: 45.5631, longitude: -73.7124 };
+          }
         }
+      }
+      
+      // GARANTIE: Si toujours pas de location, utiliser fallback Montreal
+      if (!locationToUse) {
+        locationToUse = { latitude: 45.5631, longitude: -73.7124 };
       }
       // Passer la location ET le nom au updateDriverStatus pour que le chauffeur soit visible immediatement
       const driverName = user.displayName || user.email?.split('@')[0] || 'Chauffeur';

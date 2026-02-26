@@ -55,11 +55,20 @@ function getDriverLoc(d: DispatchDriver): { latitude: number; longitude: number 
 
 function getBestDrivers(request: RideRequest, drivers: DispatchDriver[], top = 3) {
   // Filtrer uniquement les chauffeurs VRAIMENT disponibles
+  // MEME LOGIQUE que dispatch-engine.ts pour coherence
   const available = drivers.filter((d) => {
-    const statusStr = String(d.status || '').toLowerCase();
-    const isOnline = statusStr === 'online';
+    // Detection ROBUSTE du statut
+    const statusStr = String(d.status || '').toLowerCase().trim();
+    const isOnlineField = (d as any).isOnline;
+    const isOnline = statusStr === 'online' || isOnlineField === true;
+    
+    // Detection ROBUSTE de la position
     const hasLocation = !!getDriverLoc(d);
-    const noActiveRide = !d.currentRideId || d.currentRideId === '' || d.currentRideId === 'null';
+    
+    // Detection ROBUSTE de course en cours
+    const rideId = (d as any).currentRideId;
+    const noActiveRide = !rideId || rideId === '' || rideId === 'null' || rideId === 'undefined';
+    
     return isOnline && hasLocation && noActiveRide;
   });
 

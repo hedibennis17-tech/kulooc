@@ -1,10 +1,10 @@
 'use client';
 /**
- * KULOOC Dispatch Engine v2
+ * KULOOC Dispatch Engine v3 - ROBUSTE
  * ─────────────────────────────────────────────────────────────────────────────
  * SOURCE UNIQUE DE VÉRITÉ pour l'assignation des courses.
  *
- * Règles fondamentales :
+ * ARCHITECTURE ROBUSTE:
  *   1. Un seul moteur actif à la fois (singleton + flag `started`)
  *   2. Le moteur est la seule entité qui crée des documents `active_rides`
  *   3. Flux offre : pending → offered (60 s) → prochain chauffeur ou fallback
@@ -12,9 +12,11 @@
  *   5. directAssign : pour le panneau de dispatch manuel (bypass de l'offre)
  *   6. acceptOffer : appelé par use-driver.ts quand le chauffeur accepte
  *   7. declineOffer : appelé par use-driver.ts quand le chauffeur refuse
+ *   8. NOUVEAU: Recharge les chauffeurs DIRECTEMENT depuis Firestore avant chaque assignation
+ *   9. NOUVEAU: Detection robuste du statut et de la position avec fallbacks multiples
  */
 import {
-  collection, doc, query, where, onSnapshot,
+  collection, doc, query, where, onSnapshot, getDocs,
   runTransaction, serverTimestamp, updateDoc,
   setDoc, getDoc, Timestamp,
   type Firestore,
@@ -93,14 +95,22 @@ function selectBestDriver(
   maxRadiusKm = 30
 ): DispatchDriver | null {
   // Un chauffeur est disponible si:
-  // - statut 'online' (string exact - pas 'en-route', 'on-trip', 'busy', 'offline')
+  // - statut 'online' (detection robuste: string, boolean, ou objet)
   // - a une position GPS valide (location OU currentLocation)
   // - n'a PAS de course en cours (currentRideId null/undefined/empty)
   const available = drivers.filter((d) => {
-    const statusStr = String(d.status || '').toLowerCase();
-    const isOnline = statusStr === 'online';
+    // Detection ROBUSTE du statut
+    const statusStr = String(d.status || '').toLowerCase().trim();
+    const isOnlineField = (d as any).isOnline;
+    const isOnline = statusStr === 'online' || isOnlineField === true;
+    
+    // Detection ROBUSTE de la position
     const hasLocation = !!getDriverLocation(d);
-    const noActiveRide = !d.currentRideId || d.currentRideId === '' || d.currentRideId === 'null';
+    
+    // Detection ROBUSTE de course en cours
+    const rideId = d.currentRideId;
+    const noActiveRide = !rideId || rideId === '' || rideId === 'null' || rideId === 'undefined';
+    
     return isOnline && hasLocation && noActiveRide;
   });
   if (available.length === 0) return null;
@@ -194,6 +204,19 @@ export class DispatchEngine {
     await this.offerToNextDriver(request.id, []);
   }
 
+  /**
+   * ROBUSTE: Recharge les chauffeurs DIRECTEMENT depuis Firestore
+   * Ne depend pas du cache this.drivers qui peut etre desynchronise
+   */
+  private async fetchFreshDrivers(): Promise<DispatchDriver[]> {
+    const q = query(
+      collection(this.db, 'drivers'),
+      where('status', 'in', ['online', 'en-route', 'on-trip'])
+    );
+    const snap = await getDocs(q);
+    return snap.docs.map((d) => ({ id: d.id, ...d.data() } as DispatchDriver));
+  }
+
   private async offerToNextDriver(requestId: string, excludedDriverIds: string[]) {
     // Recharger la demande pour vérifier son statut actuel
     const reqSnap = await getDoc(doc(this.db, 'ride_requests', requestId));
@@ -203,8 +226,15 @@ export class DispatchEngine {
     }
     const request = { id: reqSnap.id, ...reqSnap.data() } as DispatchRequest;
 
+    // ROBUSTE: Toujours recharger les chauffeurs depuis Firestore
+    // Ne pas dependre du cache this.drivers qui peut etre desynchronise
+    const freshDrivers = await this.fetchFreshDrivers();
+    
+    // Mettre a jour le cache aussi
+    this.drivers = freshDrivers;
+
     // Filtrer les chauffeurs déjà exclus
-    const availableDrivers = this.drivers.filter(
+    const availableDrivers = freshDrivers.filter(
       (d) => !excludedDriverIds.includes(d.id)
     );
 
