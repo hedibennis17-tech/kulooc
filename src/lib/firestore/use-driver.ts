@@ -78,6 +78,30 @@ export function useDriver(): UseDriverReturn {
   const activeRideRef = useRef<typeof activeRide>(null);
   useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
 
+  // ─── SYNC STATUT AU MONTAGE ────────────────────────────────────────────────
+  // FIX CRITIQUE: useState('offline') remet TOUJOURS le chauffeur offline lors
+  // d'un changement de page (re-montage du hook). On lit Firestore au boot
+  // pour restaurer le vrai statut.
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+    getDoc(doc(db, 'drivers', user.uid)).then((snap) => {
+      if (cancelled || !snap.exists()) return;
+      const data = snap.data();
+      const fsStatus = data?.status as DriverStatus | undefined;
+      if (fsStatus && fsStatus !== 'offline') {
+        // Normaliser: en-route/on-trip → online si pas de course active
+        const normalizedStatus = (!data?.currentRideId && (fsStatus === 'en-route' || fsStatus === 'on-trip'))
+          ? 'online' : fsStatus;
+        setDriverStatus(normalizedStatus);
+        console.log('[useDriver] Statut restauré:', fsStatus, '→', normalizedStatus);
+      }
+      if (typeof data?.earningsToday === 'number') setEarningsToday(data.earningsToday);
+      if (typeof data?.ridesCompleted === 'number') setRidesCompleted(data.ridesCompleted);
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.uid]);
+
   // ─── Écouter les demandes en attente (offered + pending) ──────────────────
   useEffect(() => {
     if (!isOnline || !user) return;
