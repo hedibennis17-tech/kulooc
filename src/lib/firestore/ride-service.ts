@@ -248,29 +248,41 @@ export function subscribeToDriverActiveRide(
     limit(1)
   );
 
-  return onSnapshot(q, (snap) => {
-    if (!snap.empty) {
-      const d = snap.docs[0];
-      const ride = { id: d.id, ...d.data() } as ActiveRide;
+  return onSnapshot(
+    q,
+    (snap) => {
+      if (!snap.empty) {
+        const d = snap.docs[0];
+        const ride = { id: d.id, ...d.data() } as ActiveRide;
+        console.log('[subscribeToDriverActiveRide] Course reçue:', ride.id, ride.status);
 
-      if (ride.status === 'completed') {
-        const completedAt = (ride.rideCompletedAt || ride.completedAt) as Timestamp | undefined;
-        const completedMs = completedAt?.toMillis?.() ?? Date.now();
-        const age = Date.now() - completedMs;
+        if (ride.status === 'completed') {
+          const completedAt = (ride.rideCompletedAt || ride.completedAt) as Timestamp | undefined;
+          const completedMs = completedAt?.toMillis?.() ?? Date.now();
+          const age = Date.now() - completedMs;
 
-        if (age < COMPLETION_WINDOW_MS) {
-          callback(ride);
-          setTimeout(() => callback(null), COMPLETION_WINDOW_MS - age);
+          if (age < COMPLETION_WINDOW_MS) {
+            callback(ride);
+            setTimeout(() => callback(null), COMPLETION_WINDOW_MS - age);
+          } else {
+            callback(null);
+          }
         } else {
-          callback(null);
+          callback(ride);
         }
       } else {
-        callback(ride);
+        console.log('[subscribeToDriverActiveRide] Aucune course active pour', driverId);
+        callback(null);
       }
-    } else {
-      callback(null);
+    },
+    (error) => {
+      // ERREUR CRITIQUE: L'index Firestore composite peut être manquant
+      // Cela ne bloque PAS l'app grâce au polling fallback dans use-driver.ts
+      console.error('[subscribeToDriverActiveRide] ERREUR onSnapshot:', error.message);
+      console.error('[subscribeToDriverActiveRide] Si l\'erreur mentionne "index", créer l\'index composite: driverId + status');
+      // Ne pas appeler callback(null) ici pour ne pas écraser une course existante
     }
-  });
+  );
 }
 
 // ─── Mettre à jour le statut d'une course (Chauffeur/Dispatcher) ─────────────

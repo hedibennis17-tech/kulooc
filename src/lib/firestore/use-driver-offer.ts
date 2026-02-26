@@ -71,7 +71,7 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
     return () => unsub();
   }, [user?.uid]);
 
-  // ─── POLLING FALLBACK — Vérifier les offres toutes les 30s ─────────────────
+  // ─── POLLING FALLBACK — Vérifier les offres toutes les 15s ─────────────────
   // Corrige le problème où onSnapshot échoue silencieusement
   useEffect(() => {
     if (!user?.uid) return;
@@ -86,19 +86,23 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
         );
         const snap = await getDocs(q);
 
-        if (!snap.empty && !currentOffer) {
+        if (!snap.empty) {
           const offerDoc = snap.docs[0];
           const offer = { id: offerDoc.id, ...offerDoc.data() } as DriverOffer;
-          console.log('[useDriverOffer] Polling: Offre trouvée:', offer.id);
-          setCurrentOffer(offer);
+          
+          // Mettre à jour seulement si c'est une nouvelle offre
+          if (!currentOffer || currentOffer.id !== offer.id) {
+            console.log('[useDriverOffer] Polling: Nouvelle offre détectée:', offer.id);
+            setCurrentOffer(offer);
 
-          if (offer.expiresAt) {
-            const remaining = Math.max(0, Math.floor(
-              (offer.expiresAt.toMillis() - Date.now()) / 1000
-            ));
-            setCountdown(remaining);
-          } else {
-            setCountdown(60);
+            if (offer.expiresAt) {
+              const remaining = Math.max(0, Math.floor(
+                (offer.expiresAt.toMillis() - Date.now()) / 1000
+              ));
+              setCountdown(remaining);
+            } else {
+              setCountdown(60);
+            }
           }
         }
       } catch (err) {
@@ -106,12 +110,12 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
       }
     };
 
-    // Poll immédiatement puis toutes les 30 secondes
+    // Poll immédiatement puis toutes les 15 secondes
     pollOffers();
-    const interval = setInterval(pollOffers, 30000);
+    const interval = setInterval(pollOffers, 15000);
 
     return () => clearInterval(interval);
-  }, [user?.uid, currentOffer]);
+  }, [user?.uid, currentOffer?.id]);
 
   // Timer countdown
   useEffect(() => {

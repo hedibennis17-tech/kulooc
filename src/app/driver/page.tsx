@@ -22,7 +22,6 @@ import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
 import { NavigationMap } from '@/components/kulooc/navigation-map';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/firebase';
-import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { doc, addDoc, collection, serverTimestamp, updateDoc } from 'firebase/firestore';
 
@@ -50,7 +49,6 @@ export default function DriverHomePage() {
   const [ratingTags, setRatingTags] = useState<RatingTag[]>([]);
   const [completedRideId, setCompletedRideId] = useState<string | null>(null);
   const [completedPassengerId, setCompletedPassengerId] = useState<string | null>(null);
-  const engineStartedRef = useRef(false);
   const rideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // ── Hooks métier ───────────────────────────────────────────────────────────
@@ -63,13 +61,8 @@ export default function DriverHomePage() {
   const { currentOffer, countdown, isResponding, acceptOffer, declineOffer } =
     useDriverOffer(currentLocation ?? null);
 
-  // ── Moteur dispatch — démarre dès auth ────────────────────────────────────
-  useEffect(() => {
-    if (user?.uid && !engineStartedRef.current) {
-      getDispatchEngine(db).start();
-      engineStartedRef.current = true;
-    }
-  }, [user?.uid]);
+  // NOTE: Le moteur dispatch est géré par la page /dispatch, pas ici.
+  // Le chauffeur reçoit ses courses via le polling fallback dans useDriver.
 
   // ── Timer course ──────────────────────────────────────────────────────────
   useEffect(() => {
