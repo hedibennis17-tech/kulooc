@@ -18,7 +18,7 @@ import { useUser } from '@/firebase/provider';
 import { useDriver } from '@/lib/firestore/use-driver';
 import { useDriverOffer } from '@/lib/firestore/use-driver-offer';
 import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
-import { NavigationMap } from '@/components/kulooc/navigation-map';
+import { NavigationMap, RouteInfo } from '@/components/kulooc/navigation-map';
 import { useToast } from '@/hooks/use-toast';
 import { db } from '@/firebase';
 import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
@@ -47,6 +47,7 @@ export default function DriverHomePage() {
   const [ratingTags, setRatingTags] = useState<RatingTag[]>([]);
   const [completedRideId, setCompletedRideId] = useState<string | null>(null);
   const [completedPassengerId, setCompletedPassengerId] = useState<string | null>(null);
+  const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
   const engineStartedRef = useRef(false);
   const rideTimerRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -203,6 +204,7 @@ export default function DriverHomePage() {
             }
             mode={navMode}
             onArrived={navMode === 'to-pickup' ? handleArrived : undefined}
+            onRouteInfo={setRouteInfo}
           />
         ) : (
           <APIProvider apiKey={process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || ''}>
@@ -484,11 +486,31 @@ export default function DriverHomePage() {
 
             {/* Terminer la course — in-progress */}
             {(activeRide.status as string) === 'in-progress' && (
-              <div className="space-y-2">
-                <div className="w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 bg-green-500/20 text-green-300 border border-green-500/30">
-                  <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-                  GPS actif — Navigation vers la destination
-                </div>
+              <div className="space-y-3">
+                {/* Barre de stats style Uber */}
+                {routeInfo && (
+                  <div className={`w-full rounded-2xl px-4 py-2.5 flex items-center justify-between text-sm font-bold ${
+                    isNavActive ? 'bg-gray-800 text-white' : 'bg-gray-100 text-gray-800'
+                  }`}>
+                    <span>{routeInfo.totalDuration || fmtDur(rideTimer)}</span>
+                    <span className="text-gray-400">|</span>
+                    <span>{routeInfo.totalDistance}</span>
+                    <span className="text-gray-400">|</span>
+                    <span className="text-xs">{routeInfo.speed} <span className="font-normal opacity-70">km/h</span></span>
+                    <span className="text-gray-400">|</span>
+                    <span className="text-xs truncate max-w-[90px] opacity-80">
+                      {activeRide?.destination?.address || activeRide?.destinationAddress || 'Destination'}
+                    </span>
+                  </div>
+                )}
+                {/* Indicateur GPS actif */}
+                {!routeInfo && (
+                  <div className="w-full py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-2 bg-green-500/20 text-green-300 border border-green-500/30">
+                    <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+                    GPS actif — Navigation vers la destination
+                  </div>
+                )}
+                {/* Bouton Terminer style Uber */}
                 <button onClick={handleComplete}
                   className="w-full py-4 rounded-full bg-green-600 text-white font-black text-base shadow-lg flex items-center justify-center gap-2 active:scale-[0.98]">
                   <CheckCircle2 size={18} /> Terminer la course

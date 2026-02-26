@@ -15,11 +15,20 @@ interface NavigationStep {
   maneuver?: string;
 }
 
+export interface RouteInfo {
+  totalDuration: string;
+  totalDistance: string;
+  stepIndex: number;
+  stepTotal: number;
+  speed: number;
+}
+
 interface NavigationMapProps {
   origin: LatLng;
   destination: LatLng;
   destinationLabel?: string;
   onArrived?: () => void;
+  onRouteInfo?: (info: RouteInfo) => void;
   mode?: 'to-pickup' | 'to-destination';
 }
 
@@ -29,6 +38,7 @@ function NavigationRenderer({
   destination,
   destinationLabel,
   onArrived,
+  onRouteInfo,
   mode,
 }: NavigationMapProps) {
   const map = useMap();
@@ -37,6 +47,7 @@ function NavigationRenderer({
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [totalDistance, setTotalDistance] = useState('');
   const [totalDuration, setTotalDuration] = useState('');
+  const [speed, setSpeed] = useState(0);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
   const [heading, setHeading] = useState(0);
   const [isNavigating, setIsNavigating] = useState(false);
@@ -138,6 +149,9 @@ function NavigationRenderer({
         (pos) => {
           const current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
           map.panTo(current);
+          // Vitesse en km/h
+          const kmh = Math.round((pos.coords.speed || 0) * 3.6);
+          setSpeed(kmh);
 
           // Vérifier si on est arrivé (< 50m de la destination)
           const dist = google.maps.geometry.spherical.computeDistanceBetween(
@@ -171,6 +185,19 @@ function NavigationRenderer({
     if (maneuver.includes('roundabout')) return '↻';
     return '↑';
   };
+
+  // Notifier le parent des infos de route
+  useEffect(() => {
+    if (!onRouteInfo) return;
+    onRouteInfo({
+      totalDuration,
+      totalDistance,
+      stepIndex: currentStepIndex,
+      stepTotal: steps.length,
+      speed,
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [totalDuration, totalDistance, currentStepIndex, steps.length, speed]);
 
   const currentStep = steps[currentStepIndex];
   const nextStep = steps[currentStepIndex + 1];
