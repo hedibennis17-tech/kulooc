@@ -244,7 +244,23 @@ export function useDriver(): UseDriverReturn {
     if (!user?.uid) return;
     setIsLoading(true);
     try {
-      await updateDriverStatus(user.uid, 'online');
+      // Obtenir la position GPS actuelle ou utiliser un fallback (region Montreal)
+      let locationToUse = currentLocation;
+      if (!locationToUse && typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+        try {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 5000 });
+          });
+          locationToUse = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+          setCurrentLocation(locationToUse);
+        } catch {
+          // Fallback: position par defaut Montreal/Laval si GPS echoue
+          locationToUse = { latitude: 45.5631, longitude: -73.7124 };
+        }
+      }
+      // Passer la location ET le nom au updateDriverStatus pour que le chauffeur soit visible immediatement
+      const driverName = user.displayName || user.email?.split('@')[0] || 'Chauffeur';
+      await updateDriverStatus(user.uid, 'online', locationToUse, driverName);
       setDriverStatus('online');
       localStorage.setItem(LS_KEY, '1');
     } catch (err: any) {
@@ -252,13 +268,13 @@ export function useDriver(): UseDriverReturn {
     } finally {
       setIsLoading(false);
     }
-  }, [user?.uid]);
+  }, [user?.uid, user?.displayName, user?.email, currentLocation]);
 
   const goOffline = useCallback(async () => {
     if (!user?.uid) return;
     setIsLoading(true);
     try {
-      await updateDriverStatus(user.uid, 'offline');
+      await updateDriverStatus(user.uid, 'offline', null);
       setDriverStatus('offline');
       setPendingRequests([]);
       localStorage.removeItem(LS_KEY);

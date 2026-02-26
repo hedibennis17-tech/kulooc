@@ -311,7 +311,9 @@ export async function updateDriverLocation(
 
 export async function updateDriverStatus(
   driverId: string,
-  status: 'online' | 'offline' | 'en-route' | 'on-trip' | 'busy'
+  status: 'online' | 'offline' | 'en-route' | 'on-trip' | 'busy',
+  currentLocation?: { latitude: number; longitude: number } | null,
+  driverName?: string | null
 ): Promise<void> {
   const updates: Record<string, unknown> = {
     status,
@@ -320,10 +322,25 @@ export async function updateDriverStatus(
     isOnline: status !== 'offline',
   };
 
-  if (status === 'online') updates.onlineSince = serverTimestamp();
+  if (status === 'online') {
+    updates.onlineSince = serverTimestamp();
+    // IMPORTANT: Si une location est fournie, la mettre a jour
+    // Sinon, garder la location existante (ne pas ecraser avec null)
+    if (currentLocation) {
+      updates.location = currentLocation;
+    }
+    // Mettre a jour le nom si fourni
+    if (driverName) {
+      updates.name = driverName;
+      updates.driverName = driverName;
+    }
+    // S'assurer que currentRideId est null quand online (disponible)
+    updates.currentRideId = null;
+  }
   if (status === 'offline') {
     updates.onlineSince = null;
-    updates.location = null;
+    updates.currentRideId = null; // Nettoyer aussi currentRideId
+    // Ne pas supprimer location pour permettre la reconnexion rapide
   }
 
   await setDoc(doc(db, 'drivers', driverId), updates, { merge: true });

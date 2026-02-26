@@ -41,7 +41,7 @@ function getElapsedTime(date: Date | any): string {
 }
 
 function getBestDrivers(request: RideRequest, drivers: DispatchDriver[], top = 3) {
-  // CORRIGE: Filtrer uniquement les chauffeurs VRAIMENT disponibles
+  // Filtrer uniquement les chauffeurs VRAIMENT disponibles
   // - statut 'online' (pas en-route, on-trip, busy, offline)
   // - a une position GPS
   // - PAS de course en cours (currentRideId null/undefined/empty)
