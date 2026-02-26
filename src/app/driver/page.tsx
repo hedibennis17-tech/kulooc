@@ -333,11 +333,12 @@ export default function DriverHomePage() {
               <div className="flex items-center justify-between mb-5">
                 <div>
                   <SheetTitle className="text-xl font-black">Nouvelle course !</SheetTitle>
-                  <SheetDescription className="text-sm text-gray-500">Répondez avant la fin du compte à rebours</SheetDescription>
+                  <SheetDescription className="text-sm text-gray-500">Répondez dans les 15 secondes</SheetDescription>
                 </div>
+                {/* Directive 4 : countdown 15s — vert > 10s, orange 5-10s, rouge < 5s */}
                 <div className={`w-16 h-16 rounded-full flex items-center justify-center border-4 font-black text-2xl ${
-                  countdown > 30 ? 'border-green-500 text-green-600' :
-                  countdown > 15 ? 'border-orange-500 text-orange-600' :
+                  countdown > 10 ? 'border-green-500 text-green-600' :
+                  countdown > 5 ? 'border-orange-500 text-orange-600' :
                   'border-red-600 text-red-600 animate-pulse'}`}>
                   {countdown}
                 </div>

@@ -10,7 +10,7 @@ import { Separator } from '@/components/ui/separator';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Mail, Phone, Apple, Facebook } from 'lucide-react';
 import { FcGoogle } from 'react-icons/fc';
-import { signInWithPopup, GoogleAuthProvider, FacebookAuthProvider, OAuthProvider, createUserWithEmailAndPassword, RecaptchaVerifier, signInWithPhoneNumber, signInWithCredential, PhoneAuthProvider } from 'firebase/auth';
+import { signInWithPopup, GoogleAuthProvider, FacebookAuthProvider, OAuthProvider, createUserWithEmailAndPassword, sendEmailVerification, RecaptchaVerifier, signInWithPhoneNumber, signInWithCredential, PhoneAuthProvider } from 'firebase/auth';
 import { doc, setDoc, getDoc } from 'firebase/firestore';
 import { db, initializeFirebase } from '@/firebase';
 
@@ -65,6 +65,8 @@ export default function DriverSignupPage() {
     setIsLoading(true);
     try {
       const provider = new GoogleAuthProvider();
+      // Force le choix du compte à chaque connexion — directive AUTH-02
+      provider.setCustomParameters({ prompt: 'select_account' });
       const result = await signInWithPopup(auth, provider);
       
       await createDriverProfile(result.user.uid, result.user.email, result.user.phoneNumber);
@@ -164,11 +166,14 @@ export default function DriverSignupPage() {
     try {
       const result = await createUserWithEmailAndPassword(auth, email, password);
       
+      // Envoyer l'email de vérification — directive AUTH-03
+      await sendEmailVerification(result.user);
+      
       await createDriverProfile(result.user.uid, result.user.email, null);
       
       toast({
-        title: '🎉 Bienvenue chez KULOOC !',
-        description: 'Votre compte a été créé avec succès.',
+        title: '📧 Vérifiez votre email !',
+        description: 'Un lien de vérification a été envoyé à ' + email + '. Vérifiez votre boîte mail avant de continuer.',
       });
       
       router.push('/driver/onboarding');

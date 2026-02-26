@@ -37,6 +37,7 @@ interface UseDispatchReturn {
   autoAssign: (requestId: string) => Promise<{ success: boolean; error?: string }>;
   autoAssigning: string | null;
   updateStatus: (rideId: string, status: string) => Promise<void>;
+  forceEndRide: (rideId: string, driverId: string) => Promise<{ success: boolean; error?: string }>;
   loadDemoData: () => Promise<void>;
 }
 
@@ -166,7 +167,7 @@ export function useDispatch(): UseDispatchReturn {
     }
   }, []);
 
-  // ─── Mise à jour de statut ─────────────────────────────────────────────────
+  // ─── Mise à jour de statut ─────────────────────────────────────────────────────
   const updateStatus = useCallback(async (rideId: string, status: string) => {
     await updateDoc(doc(db, 'active_rides', rideId), {
       status,
@@ -174,7 +175,32 @@ export function useDispatch(): UseDispatchReturn {
     });
   }, []);
 
-  // ─── Charger des données de démo ──────────────────────────────────────────
+  // ─── Directive 5 : Forcer la fin d’une course (dispatcher uniquement) ─────────
+  // Met active_rides/{id}.status = 'completed'
+  // Remet drivers/{driverId}.status = 'online', currentRideId = null
+  const forceEndRide = useCallback(async (rideId: string, driverId: string): Promise<{ success: boolean; error?: string }> => {
+    try {
+      // 1. Terminer la course
+      await updateDoc(doc(db, 'active_rides', rideId), {
+        status: 'completed',
+        completedAt: serverTimestamp(),
+        forcedEndByDispatcher: true,
+        updatedAt: serverTimestamp(),
+      });
+      // 2. Remettre le chauffeur disponible
+      if (driverId) {
+        await updateDoc(doc(db, 'drivers', driverId), {
+          status: 'online',
+          currentRideId: null,
+          updatedAt: serverTimestamp(),
+          lastSeen: serverTimestamp(),
+        });
+      }
+      return { success: true };
+    } catch (err: any) {
+      return { success: false, error: err?.message || 'Erreur inconnue' };
+    }
+  }, []);// ─── Charger des données de démo ──────────────────────────────────────────
   const loadDemoData = useCallback(async () => {
     setIsLoading(true);
     try {
@@ -214,6 +240,7 @@ export function useDispatch(): UseDispatchReturn {
     autoAssign,
     autoAssigning,
     updateStatus,
+    forceEndRide,
     loadDemoData,
   };
 }

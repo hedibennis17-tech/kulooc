@@ -46,6 +46,7 @@ export default function DispatcherDashboardPage() {
     isLoading,
     assignDriver,
     updateStatus,
+    forceEndRide,
     loadDemoData,
   } = useDispatch();
 
@@ -346,6 +347,7 @@ export default function DispatcherDashboardPage() {
                   <ActiveRidesPanel
                     rides={activeRides}
                     onUpdateStatus={updateStatus}
+                    onForceEnd={forceEndRide}
                   />
                 </div>
               </TabsContent>

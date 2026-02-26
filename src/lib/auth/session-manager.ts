@@ -33,27 +33,40 @@ export function getLocalToken(): string | null {
 }
 
 /**
- * Enregistre la session dans Firestore + localStorage.
+ * Enregistre la session dans Firestore + localStorage + cookie HTTP-only.
  * Appelé après login réussi.
  * @param uid - UID de l'utilisateur
  * @param collection - Collection Firestore ('drivers' ou 'clients')
+ * @param role - Rôle de l'utilisateur pour le middleware de protection des routes
  */
 export async function registerSession(
   uid: string,
-  collection: 'drivers' | 'clients' = 'drivers'
+  collection: 'drivers' | 'clients' = 'drivers',
+  role?: string
 ): Promise<void> {
   const token = generateToken();
   if (typeof window !== 'undefined') {
     localStorage.setItem(SESSION_KEY, token);
   }
+  // Déterminer le rôle à partir de la collection si non fourni
+  const sessionRole = role || (collection === 'drivers' ? 'driver' : 'client');
   try {
+    // 1. Écrire dans Firestore (session unique cross-device)
     await setDoc(doc(db, collection, uid), {
       sessionToken: token,
       sessionRegisteredAt: serverTimestamp(),
       lastSeenAt: serverTimestamp(),
       lastActive: serverTimestamp(),
     }, { merge: true });
-    console.log(`[session] ✅ Session enregistrée uid:${uid} collection:${collection}`);
+    // 2. Écrire le cookie HTTP-only via l'API route (middleware de protection)
+    if (typeof window !== 'undefined') {
+      await fetch('/api/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ uid, token, role: sessionRole }),
+      }).catch(() => {}); // Silently fail — le cookie est optionnel
+    }
+    console.log(`[session] ✅ Session enregistrée uid:${uid} collection:${collection} role:${sessionRole}`);
   } catch (e) {
     console.warn('[session] Impossible d\'enregistrer session:', e);
   }

@@ -1,10 +1,16 @@
 rules_version = '2';
+/**
+ * KULOOC — Règles de sécurité Firestore
+ * Directive 7 : rôles stricts, protection ride_requests et rides
+ *
+ * Rôles :
+ *   - super_admin  : hedibennis17@gmail.com — accès total
+ *   - admin/dispatcher : dans admin_users — accès étendu
+ *   - driver : dans drivers/{uid} — accès à ses propres données + courses assignées
+ *   - client : dans users/{uid} — accès à ses propres demandes/courses
+ */
 service cloud.firestore {
   match /databases/{database}/documents {
-
-    // ── Constantes ────────────────────────────────────────────────────────────
-    // Email du super administrateur KULOOC
-    // Toutes les règles ci-dessous accordent un accès complet à cet utilisateur.
 
     // ── Fonctions utilitaires ─────────────────────────────────────────────────
 
@@ -12,111 +18,173 @@ service cloud.firestore {
       return request.auth != null;
     }
 
+    function uid() {
+      return request.auth.uid;
+    }
+
     function isOwner(userId) {
-      return isSignedIn() && request.auth.uid == userId;
+      return isSignedIn() && uid() == userId;
     }
 
     function isExistingDoc() {
       return resource != null;
     }
 
-    function isOwnerOfExistingDoc(userId) {
-      return isOwner(userId) && isExistingDoc();
-    }
-
     function isImmutable(fieldName) {
       return request.resource.data[fieldName] == resource.data[fieldName];
     }
 
-    // Vérifie si l'utilisateur connecté est le super admin (par email)
+    // Super admin par email
     function isSuperAdmin() {
       return isSignedIn() && request.auth.token.email == 'hedibennis17@gmail.com';
     }
 
-    // Vérifie si l'utilisateur est admin (super admin OU admin enregistré dans admin_users)
+    // Admin ou dispatcher enregistré dans admin_users
     function isAdmin() {
       return isSuperAdmin() ||
-        (isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)));
+        (isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(uid())));
     }
 
-    // Vérifie si l'utilisateur est admin ou super admin (pour créer des comptes staff)
-    function isAdminOrSuperAdmin() {
-      return isSuperAdmin() ||
-        (isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)));
+    // Chauffeur enregistré dans drivers/{uid}
+    function isDriver() {
+      return isSignedIn() && exists(/databases/$(database)/documents/drivers/$(uid()));
     }
 
-    // Vérifie que l'utilisateur est staff (dans admin_users) — bloque les clients
-    function isStaff() {
-      return isSuperAdmin() ||
-        (isSignedIn() && exists(/databases/$(database)/documents/admin_users/$(request.auth.uid)));
+    // Chauffeur propriétaire d'une course (driverId == uid)
+    function isRideDriver(rideData) {
+      return isSignedIn() && rideData.driverId == uid();
     }
 
-    function isRideParticipant(rideDoc) {
-      return isSignedIn() && (
-        request.auth.uid == rideDoc.userId ||
-        request.auth.uid == rideDoc.driverUserId
-      );
+    // Passager propriétaire d'une course (passengerId == uid)
+    function isRidePassenger(rideData) {
+      return isSignedIn() && rideData.passengerId == uid();
+    }
+
+    // Participant à une course (passager OU chauffeur)
+    function isRideParticipant(rideData) {
+      return isRidePassenger(rideData) || isRideDriver(rideData);
     }
 
     // ── users ─────────────────────────────────────────────────────────────────
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-      // Création : l'utilisateur connecté peut créer son propre profil (sans contrainte sur le champ id)
       allow create: if isOwner(userId);
-      // Mise à jour : le propriétaire peut modifier son propre doc (existant ou nouveau via setDoc merge)
       allow update: if isOwner(userId) || isAdmin();
-      allow delete: if isOwnerOfExistingDoc(userId) || isAdmin();
+      allow delete: if (isOwner(userId) && isExistingDoc()) || isAdmin();
     }
 
     match /users/{userId}/addresses/{addressId} {
       allow get, list: if isOwner(userId) || isAdmin();
       allow create: if isOwner(userId) && request.resource.data.ownerId == userId;
-      allow update: if isOwnerOfExistingDoc(userId) && isImmutable('ownerId') || isAdmin();
-      allow delete: if isOwnerOfExistingDoc(userId) || isAdmin();
+      allow update: if (isOwner(userId) && isExistingDoc() && isImmutable('ownerId')) || isAdmin();
+      allow delete: if (isOwner(userId) && isExistingDoc()) || isAdmin();
     }
 
     // ── drivers ───────────────────────────────────────────────────────────────
+    // Directive 7 : le chauffeur peut lire/modifier son propre doc
+    // Le dispatcher peut tout lire (pour la carte temps réel)
     match /drivers/{driverId} {
-      allow get, list: if isSignedIn();
-      allow create: if isSignedIn() && isOwner(request.resource.data.userId);
-      allow update: if (isExistingDoc() && isOwner(resource.data.userId) && isImmutable('userId')) || isAdmin();
-      allow delete: if (isExistingDoc() && isOwner(resource.data.userId)) || isAdmin();
+      allow get: if isSignedIn();
+      allow list: if isSignedIn(); // Dispatcher + moteur dispatch
+      allow create: if isSignedIn() && (
+        request.resource.data.userId == uid() ||
+        request.resource.data.uid == uid() ||
+        driverId == uid()
+      );
+      allow update: if (
+        isExistingDoc() && (
+          // Le chauffeur met à jour son propre doc (status, location, sessionToken, lastSeen)
+          (resource.data.userId == uid() || resource.data.uid == uid() || driverId == uid())
+        )
+      ) || isAdmin();
+      allow delete: if (isExistingDoc() && (resource.data.userId == uid() || driverId == uid())) || isAdmin();
+    }
+
+    // ── ride_requests ─────────────────────────────────────────────────────────
+    // Directive 7 : protection stricte
+    //   - Création : client authentifié uniquement (passengerId == uid)
+    //   - Lecture : passager propriétaire, chauffeur assigné, admin
+    //   - Mise à jour : passager (annulation), chauffeur assigné (accepter/refuser), admin
+    //   - Suppression : passager propriétaire ou admin
+    match /ride_requests/{requestId} {
+      allow create: if isSignedIn() && (
+        request.resource.data.passengerId == uid() ||
+        request.resource.data.userId == uid()
+      );
+      allow read: if isAdmin() || (
+        isSignedIn() && (
+          resource.data.passengerId == uid() ||
+          resource.data.userId == uid() ||
+          resource.data.offeredToDriverId == uid() ||
+          resource.data.driverId == uid()
+        )
+      );
+      // Mise à jour : admin (dispatch), chauffeur assigné (accepter/refuser), passager (annuler)
+      allow update: if isAdmin() || (
+        isSignedIn() && (
+          resource.data.passengerId == uid() ||
+          resource.data.userId == uid() ||
+          resource.data.offeredToDriverId == uid() ||
+          resource.data.driverId == uid()
+        )
+      );
+      allow delete: if isAdmin() || (
+        isSignedIn() && (
+          resource.data.passengerId == uid() ||
+          resource.data.userId == uid()
+        )
+      );
+    }
+
+    // ── active_rides ──────────────────────────────────────────────────────────
+    // Directive 7 : seuls les participants et l'admin peuvent lire/modifier
+    match /active_rides/{rideId} {
+      allow read: if isAdmin() || (isSignedIn() && isRideParticipant(resource.data));
+      allow create: if isAdmin() || isSignedIn(); // Moteur dispatch crée la course
+      allow update: if isAdmin() || (isSignedIn() && isRideParticipant(resource.data));
+      allow delete: if isAdmin();
     }
 
     // ── rides ─────────────────────────────────────────────────────────────────
     match /rides/{rideId} {
-      allow get: if isRideParticipant(resource.data) || isAdmin();
+      allow get: if isAdmin() || (isSignedIn() && isRideParticipant(resource.data));
       allow list: if isAdmin();
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if (isExistingDoc() && isRideParticipant(resource.data)) || isAdmin();
-      allow delete: if (isExistingDoc() && isRideParticipant(resource.data)) || isAdmin();
-    }
-
-    // ── ride_requests ─────────────────────────────────────────────────────────
-    match /ride_requests/{requestId} {
-      allow create: if isSignedIn();
-      allow read: if isSignedIn();
-      allow update: if isSignedIn();
-      allow delete: if isSignedIn() && resource.data.passengerId == request.auth.uid || isAdmin();
-    }
-
-    // ── active_rides ──────────────────────────────────────────────────────────
-    match /active_rides/{rideId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
+      allow create: if isSignedIn() && (
+        request.resource.data.passengerId == uid() ||
+        request.resource.data.userId == uid()
+      );
+      allow update: if isAdmin() || (isSignedIn() && isRideParticipant(resource.data));
       allow delete: if isAdmin();
     }
 
     // ── completed_rides ───────────────────────────────────────────────────────
     match /completed_rides/{rideId} {
-      allow read: if isAdmin() || (isSignedIn() && (
-        resource.data.passengerId == request.auth.uid ||
-        resource.data.driverId == request.auth.uid
-      ));
-      allow create: if isSignedIn();
+      allow read: if isAdmin() || (isSignedIn() && isRideParticipant(resource.data));
+      allow create: if isAdmin() || isSignedIn(); // Moteur dispatch complète la course
       allow update, delete: if isAdmin();
+    }
+
+    // ── driver_offers ─────────────────────────────────────────────────────────
+    // Directive 7 : le chauffeur ne peut lire que ses propres offres
+    match /driver_offers/{offerId} {
+      allow read: if isAdmin() || (isSignedIn() && (
+        resource.data.driverId == uid()
+      ));
+      allow create: if isAdmin() || isSignedIn(); // Moteur dispatch crée les offres
+      allow update: if isAdmin() || (isSignedIn() && (
+        resource.data.driverId == uid() // Chauffeur accepte/refuse
+      ));
+      allow delete: if isAdmin();
+    }
+
+    // ── clients ───────────────────────────────────────────────────────────────
+    match /clients/{clientId} {
+      allow get: if isOwner(clientId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(clientId);
+      allow update: if isOwner(clientId) || isAdmin();
+      allow delete: if isAdmin();
     }
 
     // ── zones ─────────────────────────────────────────────────────────────────
@@ -163,143 +231,114 @@ service cloud.firestore {
 
     // ── ratings ───────────────────────────────────────────────────────────────
     match /ratings/{ratingId} {
-      allow read: if isSignedIn();
+      allow read: if isAdmin() || (isSignedIn() && (
+        resource.data.raterId == uid() ||
+        resource.data.ratedId == uid()
+      ));
       allow create: if isSignedIn();
       allow update, delete: if isAdmin();
     }
 
     // ── notifications ─────────────────────────────────────────────────────────
     match /notifications/{notifId} {
-      allow read: if isSignedIn() && resource.data.userId == request.auth.uid || isAdmin();
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
       allow create: if isSignedIn();
-      allow update: if isSignedIn() && resource.data.userId == request.auth.uid || isAdmin();
-      allow delete: if isSignedIn() && resource.data.userId == request.auth.uid || isAdmin();
+      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
     }
 
     // ── favorite_addresses ────────────────────────────────────────────────────
     match /favorite_addresses/{addressId} {
-      allow get, list: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if (isSignedIn() && resource.data.userId == request.auth.uid && isImmutable('userId')) || isAdmin();
-      allow delete: if (isSignedIn() && resource.data.userId == request.auth.uid) || isAdmin();
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
+      allow create: if isSignedIn() && request.resource.data.userId == uid();
+      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == uid() && isImmutable('userId'));
+      allow delete: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
     }
 
     // ── driver_documents ──────────────────────────────────────────────────────
     match /driver_documents/{documentId} {
       allow read: if isAdmin() || (isSignedIn() && (
-        resource.data.driverId == request.auth.uid ||
-        resource.data.userId == request.auth.uid
+        resource.data.driverId == uid() || resource.data.userId == uid()
       ));
       allow create: if isSignedIn() && (
-        request.resource.data.driverId == request.auth.uid ||
-        request.resource.data.userId == request.auth.uid
+        request.resource.data.driverId == uid() || request.resource.data.userId == uid()
       );
       allow update: if isAdmin() || (isSignedIn() && (
-        resource.data.driverId == request.auth.uid ||
-        resource.data.userId == request.auth.uid
+        resource.data.driverId == uid() || resource.data.userId == uid()
       ));
       allow delete: if isAdmin() || (isSignedIn() && (
-        resource.data.driverId == request.auth.uid ||
-        resource.data.userId == request.auth.uid
+        resource.data.driverId == uid() || resource.data.userId == uid()
       ));
     }
 
     // ── background_checks ─────────────────────────────────────────────────────
     match /background_checks/{checkId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
+      allow create: if isSignedIn() && request.resource.data.userId == uid();
+      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
       allow delete: if isAdmin();
     }
 
     // ── training_certificates ─────────────────────────────────────────────────
     match /training_certificates/{certId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
-      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
-      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow read: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
+      allow create: if isSignedIn() && request.resource.data.userId == uid();
+      allow update: if isAdmin() || (isSignedIn() && resource.data.userId == uid());
       allow delete: if isAdmin();
     }
 
     // ── admin_users ───────────────────────────────────────────────────────────
-    // Super Admin : accès total
-    // Admin : peut lire la liste et créer des comptes staff (dispatcher, agent, developer)
-    // Staff : peut lire son propre document
-    // Clients (non admin_users) : AUCUN accès
     match /admin_users/{userId} {
       allow get: if isSuperAdmin() || isOwner(userId) || isAdmin();
       allow list: if isSuperAdmin() || isAdmin();
-      // Super Admin peut tout créer/modifier
-      // Admin peut créer des comptes staff (sauf super-admin)
       allow create: if isSuperAdmin() ||
         (isAdmin() && request.resource.data.role != 'super_admin' && request.resource.data.role != 'super-admin');
       allow update: if isSuperAdmin() ||
-        (isAdmin() && resource.data.role != 'super_admin' && resource.data.role != 'super-admin' &&
+        (isAdmin() &&
+         resource.data.role != 'super_admin' && resource.data.role != 'super-admin' &&
          request.resource.data.role != 'super_admin' && request.resource.data.role != 'super-admin');
       allow delete: if isSuperAdmin();
     }
 
-
     // ── bonuses ───────────────────────────────────────────────────────────────
     match /bonuses/{bonusId} {
-      allow read: if isAdmin() || (isSignedIn() && resource.data.driverId == request.auth.uid);
-      allow create: if isAdmin();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow read: if isAdmin() || (isSignedIn() && resource.data.driverId == uid());
+      allow create, update, delete: if isAdmin();
     }
 
     // ── messages ──────────────────────────────────────────────────────────────
     match /messages/{messageId} {
       allow read: if isAdmin() || (isSignedIn() && (
-        resource.data.senderId == request.auth.uid ||
-        resource.data.recipientId == request.auth.uid
+        resource.data.senderId == uid() || resource.data.recipientId == uid()
       ));
       allow create: if isSignedIn();
-      allow update: if isAdmin() || (isSignedIn() && resource.data.recipientId == request.auth.uid);
+      allow update: if isAdmin() || (isSignedIn() && resource.data.recipientId == uid());
       allow delete: if isAdmin();
     }
 
     // ── sms_logs ──────────────────────────────────────────────────────────────
     match /sms_logs/{logId} {
-      allow read: if isAdmin();
-      allow create: if isAdmin();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow read, write: if isAdmin();
     }
 
     // ── h3_cells_aggregates ───────────────────────────────────────────────────
     match /h3_cells_aggregates/{cellId} {
       allow read: if isSignedIn();
-      allow create: if isAdmin();
-      allow update: if isAdmin();
-      allow delete: if isAdmin();
+      allow write: if isAdmin();
     }
 
-    // ── analytics / reports ───────────────────────────────────────────────────
+    // ── analytics / reports / settings ────────────────────────────────────────
     match /analytics/{docId} {
-      allow read: if isAdmin();
-      allow write: if isAdmin();
+      allow read, write: if isAdmin();
     }
-
     match /reports/{docId} {
-      allow read: if isAdmin();
-      allow write: if isAdmin();
+      allow read, write: if isAdmin();
     }
-
-    // ── settings ──────────────────────────────────────────────────────────────
     match /settings/{settingId} {
-      allow read: if isAdmin();
-      allow write: if isAdmin();
+      allow read, write: if isAdmin();
     }
 
-    // ── driver_offers ─────────────────────────────────────────────────────────
-    match /driver_offers/{offerId} {
-      allow read: if isSignedIn();
-      allow create: if isSignedIn();
-      allow update: if isSignedIn();
-      allow delete: if isAdmin();
-    }
-
-    // ── Règle par défaut : tout refuser ───────────────────────────────────────────
+    // ── Règle par défaut : admin seulement ────────────────────────────────────
     match /{document=**} {
       allow read, write: if isAdmin();
     }

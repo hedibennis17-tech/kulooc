@@ -1,7 +1,15 @@
 'use client';
+/**
+ * KULOOC — NavigationMap v3
+ * Directive 3 : GPS chauffeur
+ *   - Marqueur SVG Google Maps natif (google.maps.Symbol) avec rotation heading
+ *   - Décentrage : padding bottom 260px dans fitBounds + panTo offset
+ *   - Géofencing 50m : détection d'arrivée automatique
+ *   - Boussole : webkitCompassHeading (iOS) > alpha (Android) > GPS heading
+ */
 import { useEffect, useRef, useState, useCallback } from 'react';
-import { APIProvider, Map, AdvancedMarker, useMap } from '@vis.gl/react-google-maps';
-import { Navigation, Volume2, VolumeX, Compass, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
+import { APIProvider, Map, useMap } from '@vis.gl/react-google-maps';
+import { Volume2, VolumeX, Compass, ChevronLeft, ChevronRight, RotateCcw } from 'lucide-react';
 
 interface LatLng {
   lat: number;
@@ -43,16 +51,23 @@ function NavigationRenderer({
 }: NavigationMapProps) {
   const map = useMap();
   const directionsRendererRef = useRef<google.maps.DirectionsRenderer | null>(null);
+  const driverMarkerRef = useRef<google.maps.Marker | null>(null);
+  const destMarkerRef = useRef<google.maps.Marker | null>(null);
   const [steps, setSteps] = useState<NavigationStep[]>([]);
   const [currentStepIndex, setCurrentStepIndex] = useState(0);
   const [totalDistance, setTotalDistance] = useState('');
   const [totalDuration, setTotalDuration] = useState('');
   const [speed, setSpeed] = useState(0);
   const [voiceEnabled, setVoiceEnabled] = useState(true);
-  const [heading, setHeading] = useState<number | null>(null);
+  const [heading, setHeading] = useState<number>(0);
   const [isNavigating, setIsNavigating] = useState(false);
+  const [currentPos, setCurrentPos] = useState<LatLng>(origin);
   const watchIdRef = useRef<number | null>(null);
   const lastSpokenRef = useRef('');
+  const arrivedRef = useRef(false);
+
+  // Couleur selon le mode
+  const modeColor = mode === 'to-pickup' ? '#3B82F6' : '#EF4444';
 
   // Synthèse vocale
   const speak = useCallback((text: string) => {
@@ -68,21 +83,115 @@ function NavigationRenderer({
     }
   }, [voiceEnabled]);
 
-  // Calculer l'itinéraire via Directions API
+  // ── Créer/mettre à jour le marqueur chauffeur SVG Google Maps natif ──────
+  // Directive 3 : path SVG triangle, rotation = heading, anchor au centre
+  useEffect(() => {
+    if (!map) return;
+
+    const driverIcon: google.maps.Symbol = {
+      // Triangle pointant vers le haut (Nord) — même path que le document
+      path: 'M 0,0 L -10,-20 L 10,-20 Z',
+      fillColor: modeColor,
+      fillOpacity: 1,
+      strokeColor: '#FFFFFF',
+      strokeWeight: 2,
+      rotation: heading,
+      scale: 1.5,
+      // Ancre au centre géométrique du triangle
+      anchor: new google.maps.Point(0, -10),
+    };
+
+    if (!driverMarkerRef.current) {
+      // Créer le marqueur la première fois
+      driverMarkerRef.current = new google.maps.Marker({
+        position: currentPos,
+        map,
+        icon: driverIcon,
+        zIndex: 100,
+        title: 'Chauffeur',
+      });
+    } else {
+      // Mettre à jour position + rotation
+      driverMarkerRef.current.setPosition(currentPos);
+      driverMarkerRef.current.setIcon(driverIcon);
+    }
+
+    return () => {
+      if (driverMarkerRef.current) {
+        driverMarkerRef.current.setMap(null);
+        driverMarkerRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+
+  // Mettre à jour le marqueur quand position ou heading change
+  useEffect(() => {
+    if (!driverMarkerRef.current || !map) return;
+    const driverIcon: google.maps.Symbol = {
+      path: 'M 0,0 L -10,-20 L 10,-20 Z',
+      fillColor: modeColor,
+      fillOpacity: 1,
+      strokeColor: '#FFFFFF',
+      strokeWeight: 2,
+      rotation: heading,
+      scale: 1.5,
+      anchor: new google.maps.Point(0, -10),
+    };
+    driverMarkerRef.current.setPosition(currentPos);
+    driverMarkerRef.current.setIcon(driverIcon);
+  }, [currentPos, heading, modeColor, map]);
+
+  // ── Marqueur destination ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (!map) return;
+
+    const destIcon: google.maps.Symbol = {
+      path: google.maps.SymbolPath.CIRCLE,
+      fillColor: modeColor,
+      fillOpacity: 1,
+      strokeColor: '#FFFFFF',
+      strokeWeight: 3,
+      scale: 10,
+    };
+
+    if (!destMarkerRef.current) {
+      destMarkerRef.current = new google.maps.Marker({
+        position: destination,
+        map,
+        icon: destIcon,
+        zIndex: 90,
+        title: destinationLabel || 'Destination',
+        label: {
+          text: mode === 'to-pickup' ? '👤' : '🏁',
+          fontSize: '16px',
+        },
+      });
+    }
+
+    return () => {
+      if (destMarkerRef.current) {
+        destMarkerRef.current.setMap(null);
+        destMarkerRef.current = null;
+      }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map]);
+
+  // ── Calculer l'itinéraire via Directions API ─────────────────────────────
   useEffect(() => {
     if (!map || !origin || !destination) return;
 
     const directionsService = new google.maps.DirectionsService();
 
-    // Supprimer l'ancien renderer
     if (directionsRendererRef.current) {
       directionsRendererRef.current.setMap(null);
     }
 
     const renderer = new google.maps.DirectionsRenderer({
-      suppressMarkers: true,
+      suppressMarkers: true, // On gère nos propres marqueurs
       polylineOptions: {
-        strokeColor: mode === 'to-pickup' ? '#3B82F6' : '#EF4444',
+        strokeColor: modeColor,
         strokeWeight: 6,
         strokeOpacity: 0.9,
       },
@@ -117,12 +226,12 @@ function NavigationRenderer({
             setCurrentStepIndex(0);
             if (parsedSteps[0]) speak(parsedSteps[0].instruction);
           }
-          // Centrer la carte avec padding bottom pour décentrer le chauffeur vers le bas
+          // Directive 3 : padding bottom 260px pour décentrer le chauffeur vers le bas
           const bounds = result.routes[0]?.bounds;
           if (bounds) {
             map.fitBounds(bounds, {
               top: 80,
-              bottom: 260, // Padding bottom important : pousse la vue vers le haut
+              bottom: 260,
               left: 20,
               right: 20,
             });
@@ -136,62 +245,64 @@ function NavigationRenderer({
         directionsRendererRef.current.setMap(null);
       }
     };
-  }, [map, origin.lat, origin.lng, destination.lat, destination.lng, mode, speak]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, origin.lat, origin.lng, destination.lat, destination.lng, mode]);
 
-  // Suivi GPS en temps réel + boussole
+  // ── Suivi GPS en temps réel + boussole ──────────────────────────────────
   useEffect(() => {
     if (!map) return;
 
-    // Boussole via DeviceOrientationEvent
-    // webkitCompassHeading est disponible sur iOS (donne le cap réel)
-    // alpha sur Android (azimut magnétique)
+    // Boussole — Directive 3 : webkitCompassHeading (iOS) > 360-alpha (Android)
     const handleOrientation = (e: DeviceOrientationEvent) => {
       const ev = e as DeviceOrientationEvent & { webkitCompassHeading?: number };
       if (ev.webkitCompassHeading !== undefined && ev.webkitCompassHeading !== null) {
-        // iOS : webkitCompassHeading est déjà en degrés depuis le Nord (0-360)
         setHeading(Math.round(ev.webkitCompassHeading));
       } else if (e.alpha !== null) {
-        // Android : alpha est l'azimut (0 = Nord, croissant vers l'Est)
-        // Convertir en cap de navigation (même convention)
         setHeading(Math.round(360 - e.alpha));
       }
     };
 
-    // Préférer l'événement absolu (plus précis) si disponible
     window.addEventListener('deviceorientationabsolute', handleOrientation as EventListener, true);
     window.addEventListener('deviceorientation', handleOrientation as EventListener, true);
 
-    // Suivi position GPS
+    // Suivi GPS
     if (navigator.geolocation) {
       watchIdRef.current = navigator.geolocation.watchPosition(
         (pos) => {
           const current = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setCurrentPos(current);
 
-          // Utiliser le cap GPS si disponible (plus fiable en mouvement)
+          // Cap GPS prioritaire en mouvement (plus fiable que la boussole)
           if (pos.coords.heading !== null && pos.coords.heading !== undefined && !isNaN(pos.coords.heading)) {
             setHeading(Math.round(pos.coords.heading));
           }
 
-          // Décentrer le marqueur vers le bas : utiliser panTo avec offset
-          // On décale le centre de la carte vers le haut pour que le chauffeur
-          // apparaisse dans le tiers inférieur de l'écran
-          map.panTo(current);
+          // Directive 3 : décentrer le chauffeur vers le bas
+          // setOptions avec padding pousse le centre vers le haut
+          map.setOptions({
+            center: current,
+            zoom: map.getZoom(),
+          });
 
           // Vitesse en km/h
-          const kmh = Math.round((pos.coords.speed || 0) * 3.6);
-          setSpeed(kmh);
+          setSpeed(Math.round((pos.coords.speed || 0) * 3.6));
 
-          // Vérifier si on est arrivé (< 50m de la destination)
-          const dist = google.maps.geometry.spherical.computeDistanceBetween(
-            new google.maps.LatLng(current.lat, current.lng),
-            new google.maps.LatLng(destination.lat, destination.lng)
-          );
-          if (dist < 50 && onArrived) {
-            speak('Vous êtes arrivé à destination');
-            onArrived();
+          // Directive 3 : Géofencing 50m — détection d'arrivée
+          if (!arrivedRef.current) {
+            const dist = google.maps.geometry.spherical.computeDistanceBetween(
+              new google.maps.LatLng(current.lat, current.lng),
+              new google.maps.LatLng(destination.lat, destination.lng)
+            );
+            if (dist < 50) {
+              arrivedRef.current = true;
+              speak('Vous êtes arrivé à destination');
+              if (onArrived) onArrived();
+            }
           }
         },
-        null,
+        (err) => {
+          console.warn('[GPS] Erreur watchPosition:', err.message);
+        },
         { enableHighAccuracy: true, maximumAge: 2000, timeout: 5000 }
       );
     }
@@ -203,16 +314,8 @@ function NavigationRenderer({
       window.removeEventListener('deviceorientation', handleOrientation as EventListener, true);
       if (watchIdRef.current !== null) navigator.geolocation.clearWatch(watchIdRef.current);
     };
-  }, [map, destination.lat, destination.lng, onArrived, speak]);
-
-  // Icône de manœuvre
-  const getManeuverIcon = (maneuver: string) => {
-    if (maneuver.includes('left')) return '↰';
-    if (maneuver.includes('right')) return '↱';
-    if (maneuver.includes('uturn')) return '↩';
-    if (maneuver.includes('roundabout')) return '↻';
-    return '↑';
-  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [map, destination.lat, destination.lng]);
 
   // Notifier le parent des infos de route
   useEffect(() => {
@@ -227,54 +330,20 @@ function NavigationRenderer({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [totalDuration, totalDistance, currentStepIndex, steps.length, speed]);
 
+  // Icône de manœuvre
+  const getManeuverIcon = (maneuver: string) => {
+    if (maneuver.includes('left')) return '↰';
+    if (maneuver.includes('right')) return '↱';
+    if (maneuver.includes('uturn')) return '↩';
+    if (maneuver.includes('roundabout')) return '↻';
+    return '↑';
+  };
+
   const currentStep = steps[currentStepIndex];
   const nextStep = steps[currentStepIndex + 1];
 
-  // Rotation du triangle chauffeur : heading depuis le Nord
-  // null = pas encore de cap → afficher sans rotation
-  const markerRotation = heading !== null ? heading : 0;
-
   return (
     <>
-      {/* ── Marqueur position chauffeur — triangle orienté vers le Nord ── */}
-      {/* Le marqueur est positionné à l'origine (position GPS réelle)      */}
-      {/* La carte est décalée vers le haut via paddingBottom pour que      */}
-      {/* le marqueur apparaisse dans le tiers inférieur de l'écran         */}
-      <AdvancedMarker position={origin}>
-        <div
-          style={{
-            width: 0,
-            height: 0,
-            // Triangle CSS pointant vers le haut (Nord)
-            borderLeft: '10px solid transparent',
-            borderRight: '10px solid transparent',
-            borderBottom: `22px solid ${mode === 'to-pickup' ? '#3B82F6' : '#EF4444'}`,
-            filter: 'drop-shadow(0 2px 4px rgba(0,0,0,0.4))',
-            transform: `rotate(${markerRotation}deg)`,
-            transition: 'transform 0.4s ease',
-            // Centrage du point de rotation au centre du triangle
-            transformOrigin: '50% 66%',
-          }}
-        />
-      </AdvancedMarker>
-
-      {/* Marqueur destination */}
-      <AdvancedMarker position={destination}>
-        <div className="flex flex-col items-center">
-          <div
-            className="w-10 h-10 rounded-full flex items-center justify-center shadow-xl border-2 border-white text-white font-black text-xs"
-            style={{ background: mode === 'to-pickup' ? '#3B82F6' : '#EF4444' }}
-          >
-            {mode === 'to-pickup' ? '👤' : '🏁'}
-          </div>
-          {destinationLabel && (
-            <div className="mt-1 bg-white rounded-lg px-2 py-0.5 text-xs font-bold shadow text-gray-800 max-w-28 text-center truncate">
-              {destinationLabel}
-            </div>
-          )}
-        </div>
-      </AdvancedMarker>
-
       {/* ── Bandeau instruction en haut ── */}
       {currentStep && (
         <div
@@ -290,7 +359,9 @@ function NavigationRenderer({
               {getManeuverIcon(currentStep.maneuver || '')}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-white font-black text-base leading-tight">{currentStep.instruction}</p>
+              <p className="text-white font-bold text-base leading-tight line-clamp-2">
+                {currentStep.instruction}
+              </p>
               <p className="text-white/70 text-sm mt-0.5">{currentStep.distance}</p>
             </div>
             {/* Boussole */}
@@ -298,15 +369,13 @@ function NavigationRenderer({
               <div
                 className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center"
                 style={{
-                  transform: `rotate(${heading !== null ? -heading : 0}deg)`,
+                  transform: `rotate(${-heading}deg)`,
                   transition: 'transform 0.3s',
                 }}
               >
                 <Compass size={16} className="text-white" />
               </div>
-              <span className="text-white/60 text-xs">
-                {heading !== null ? `${heading}°` : '—'}
-              </span>
+              <span className="text-white/60 text-xs">{heading}°</span>
             </div>
           </div>
 
@@ -337,8 +406,7 @@ function NavigationRenderer({
         <button
           onClick={() => {
             if (map) {
-              map.panTo(origin);
-              // Appliquer le padding pour repositionner le chauffeur en bas
+              map.panTo(currentPos);
               map.setZoom(17);
             }
           }}
@@ -366,7 +434,7 @@ function NavigationRenderer({
                   className="h-1.5 rounded-full transition-all"
                   style={{
                     width: `${((currentStepIndex + 1) / steps.length) * 100}%`,
-                    background: mode === 'to-pickup' ? '#3B82F6' : '#EF4444',
+                    background: modeColor,
                   }}
                 />
               </div>
@@ -390,10 +458,13 @@ function NavigationRenderer({
         </div>
       )}
 
-      {/* ── Indicateur vitesse (en bas à gauche) ── */}
-      {isNavigating && (
-        <div className="absolute bottom-52 right-4 z-20" style={{ bottom: steps.length > 0 ? '14rem' : '4rem' }}>
-          {/* vitesse déjà dans la barre de progression si steps > 0 */}
+      {/* ── Indicateur vitesse ── */}
+      {isNavigating && speed > 0 && (
+        <div className="absolute bottom-4 left-4 z-20">
+          <div className="bg-white rounded-xl px-3 py-2 shadow-lg border border-gray-200 text-center">
+            <p className="text-xl font-black text-gray-900">{speed}</p>
+            <p className="text-xs text-gray-400">km/h</p>
+          </div>
         </div>
       )}
     </>
@@ -414,9 +485,6 @@ export function NavigationMap(props: NavigationMapProps) {
           gestureHandling="greedy"
           disableDefaultUI={true}
           className="w-full h-full"
-          // paddingBottom pousse le centre de la carte vers le haut
-          // pour que le marqueur chauffeur apparaisse dans le tiers inférieur
-          style={{ paddingBottom: '200px' }}
         >
           <NavigationRenderer {...props} />
         </Map>

@@ -32,7 +32,8 @@ export interface DriverOffer {
 export function useDriverOffer(currentLocation: { latitude: number; longitude: number } | null) {
   const { user } = useUser();
   const [currentOffer, setCurrentOffer] = useState<DriverOffer | null>(null);
-  const [countdown, setCountdown] = useState(60);
+  // Directive 4 : compte à rebours 15s (document p.488)
+  const [countdown, setCountdown] = useState(15);
   const [isResponding, setIsResponding] = useState(false);
   const countdownRef = useRef<NodeJS.Timeout | null>(null);
 
@@ -52,18 +53,19 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
         const offer = { id: offerDoc.id, ...offerDoc.data() } as DriverOffer;
         setCurrentOffer(offer);
 
-        // Calculer le countdown restant
+        // Directive 4 : countdown 15s
         if (offer.expiresAt) {
           const remaining = Math.max(0, Math.floor(
             (offer.expiresAt.toMillis() - Date.now()) / 1000
           ));
-          setCountdown(remaining);
+          // Limiter à 15s maximum
+          setCountdown(Math.min(15, remaining));
         } else {
-          setCountdown(60);
+          setCountdown(15);
         }
       } else {
         setCurrentOffer(null);
-        setCountdown(60);
+        setCountdown(15);
         if (countdownRef.current) clearInterval(countdownRef.current);
       }
     });
@@ -81,6 +83,18 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
       setCountdown((prev) => {
         if (prev <= 1) {
           if (countdownRef.current) clearInterval(countdownRef.current);
+          // Directive 4 : refus automatique quand countdown atteint 0
+          // Utiliser setTimeout pour éviter les appels d'état dans setState
+          setTimeout(() => {
+            setCurrentOffer((offer) => {
+              if (offer) {
+                // Décliner automatiquement
+                const engine = getDispatchEngine(db);
+                engine.declineOffer(offer.requestId, offer.driverId).catch(() => {});
+              }
+              return null;
+            });
+          }, 100);
           return 0;
         }
         return prev - 1;
