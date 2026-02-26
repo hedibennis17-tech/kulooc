@@ -450,9 +450,6 @@ export default function DriverHomePage() {
                 <p className={`text-xl font-black ${isNavActive ? 'text-green-400' : 'text-green-600'}`}>
                   {fmtMoney(activeRide.estimatedPrice || activeRide.pricing?.total || 0)}
                 </p>
-                <p className={`text-xs ${isNavActive ? 'text-green-400/70' : 'text-green-500/80'}`}>
-                  Gain: {fmtMoney((activeRide.estimatedPrice || 0) * 0.70)}
-                </p>
               </div>
             </div>
 
