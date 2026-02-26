@@ -18,6 +18,8 @@ import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
 import { autocompleteAddress, reverseGeocode, type AutocompletePrediction } from '@/app/actions/places';
 import { useGeolocation } from '@/lib/hooks/use-geolocation';
 import { calculateFare, generateInvoiceText } from '@/lib/services/fare-service';
+import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
+import { db as firestoreInstance } from '@/firebase';
 import { RatingModal } from '@/components/kulooc/rating-modal';
 import { db } from '@/firebase';
 import { onSnapshot, doc } from 'firebase/firestore';
@@ -252,6 +254,17 @@ export default function ClientHomePage() {
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const selectedServiceData = SERVICE_TYPES.find(s => s.id === selectedService)!;
+
+  // ─── Moteur dispatch — singleton, démarre dès auth ──────────────────────────
+  // Fix V0: le moteur DOIT tourner côté client aussi (pas seulement /dispatch)
+  const engineStartedRef = useRef(false);
+  useEffect(() => {
+    if (user?.uid && !engineStartedRef.current) {
+      getDispatchEngine(firestoreInstance).start();
+      engineStartedRef.current = true;
+      console.log('[client] Dispatch engine démarré');
+    }
+  }, [user?.uid]);
 
   // ─── Géolocalisation → adresse réelle ──────────────────────────────────────
   useEffect(() => {

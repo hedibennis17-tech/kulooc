@@ -11,7 +11,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   collection, query, where, orderBy, limit,
   onSnapshot, doc, updateDoc, setDoc, getDoc,
-  serverTimestamp, runTransaction,
+  serverTimestamp,
 } from 'firebase/firestore';
 import { db } from '@/firebase';
 import { getDispatchEngine } from './dispatch-engine';
@@ -125,90 +125,24 @@ export function useDispatch(): UseDispatchReturn {
     return 1.0;
   })();
 
-  // ─── Assignation manuelle (bypass du moteur) ───────────────────────────────
-  // On écrit directement dans Firestore sans passer par le moteur
-  // pour éviter les problèmes de singleton et de drivers non chargés
+  // ─── Assignation manuelle — délègue à engine.directAssign() ──────────────
+  // RÈGLE V0: Le moteur est la SEULE source de vérité pour active_rides.
+  // Plus de runTransaction direct ici.
   const assignDriver = useCallback(async (requestId: string, driverId: string): Promise<{ success: boolean; error?: string }> => {
     const driver = drivers.find((d) => d.id === driverId);
     if (!driver) return { success: false, error: 'Chauffeur introuvable' };
     try {
       const driverName = (driver as any).driverName || (driver as any).name || (driver as any).displayName || 'Chauffeur';
       const driverLoc = (driver as any).currentLocation || (driver as any).location || null;
-
-      await runTransaction(db, async (tx) => {
-        const reqRef = doc(db, 'ride_requests', requestId);
-        const drvRef = doc(db, 'drivers', driverId);
-        const [reqSnap, drvSnap] = await Promise.all([tx.get(reqRef), tx.get(drvRef)]);
-
-        if (!reqSnap.exists()) throw new Error('Demande introuvable');
-        const reqData = reqSnap.data();
-
-        // Accepter même si statut est 'offered' ou 'pending'
-        if (!['pending', 'offered', 'searching'].includes(reqData.status)) {
-          throw new Error(`Demande déjà assignée (statut: ${reqData.status})`);
-        }
-
-        const { collection: col } = await import('firebase/firestore');
-        const rideRef = doc(col(db, 'active_rides'));
-
-        tx.set(rideRef, {
-          requestId,
-          passengerId: reqData.passengerId || '',
-          passengerName: reqData.passengerName || 'Passager',
-          passengerPhone: reqData.passengerPhone || '',
-          driverId,
-          driverName,
-          driverLocation: driverLoc,
-          pickup: reqData.pickup,
-          destination: reqData.destination,
-          serviceType: reqData.serviceType || 'KULOOC X',
-          estimatedPrice: reqData.estimatedPrice || 0,
-          estimatedDistanceKm: reqData.estimatedDistanceKm || 0,
-          estimatedDurationMin: reqData.estimatedDurationMin || 0,
-          surgeMultiplier: reqData.surgeMultiplier || 1.0,
-          status: 'driver-assigned',
-          pricing: {
-            subtotal: +((reqData.estimatedPrice || 0) / 1.14975).toFixed(2),
-            tax: +((reqData.estimatedPrice || 0) - (reqData.estimatedPrice || 0) / 1.14975).toFixed(2),
-            total: reqData.estimatedPrice || 0,
-            surgeMultiplier: reqData.surgeMultiplier || 1.0,
-          },
-          assignedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          rideStartedAt: null,
-          rideCompletedAt: null,
-          finalPrice: null,
-          driverRating: null,
-          passengerRating: null,
-          assignedManually: true,
-        });
-
-        tx.update(reqRef, {
-          status: 'driver-assigned',
-          driverId,
-          driverName,
-          assignedAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          activeRideId: rideRef.id,
-        });
-
-        if (drvSnap.exists()) {
-          tx.update(drvRef, {
-            status: 'en-route',
-            currentRideId: rideRef.id,
-            updatedAt: serverTimestamp(),
-          });
-        }
-      });
-
-      return { success: true };
+      const engine = getDispatchEngine(db);
+      return await engine.directAssign(requestId, driverId, driverName, driverLoc);
     } catch (err: any) {
       console.error('assignDriver error:', err);
       return { success: false, error: err?.message || 'Erreur inconnue' };
     }
   }, [drivers]);
 
-  // ─── Assignation automatique via le moteur ─────────────────────────────────
+    // ─── Assignation automatique via le moteur ─────────────────────────────────
   const autoAssign = useCallback(async (requestId: string): Promise<{ success: boolean; error?: string }> => {
     setAutoAssigning(requestId);
     try {
