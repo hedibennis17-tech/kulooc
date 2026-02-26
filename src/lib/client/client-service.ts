@@ -116,12 +116,16 @@ export async function updateClientProfile(
 
 /**
  * Crée une demande de course dans Firestore.
+ * IMPORTANT: Utilise `requestedAt` (pas `createdAt`) pour être compatible avec
+ * le Dispatch Engine et le Dashboard qui utilisent `orderBy('requestedAt', 'asc')`.
  */
 export async function createRideRequest(request: Omit<RideRequest, 'createdAt' | 'status'>): Promise<string> {
   const ref = await addDoc(collection(db, 'ride_requests'), {
     ...request,
     status: 'pending',
-    createdAt: serverTimestamp(),
+    requestedAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+    createdAt: serverTimestamp(), // Gardé pour compatibilité
   });
   return ref.id;
 }

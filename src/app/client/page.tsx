@@ -21,6 +21,7 @@ import { calculateFare, generateInvoiceText } from '@/lib/services/fare-service'
 import { RatingModal } from '@/components/kulooc/rating-modal';
 import { db } from '@/firebase';
 import { onSnapshot, doc } from 'firebase/firestore';
+import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
 
 // ─── Tarifs KULOOC ────────────────────────────────────────────────────────────
 
@@ -166,7 +167,7 @@ function ClientMapView({ apiKey, drivers, userPos, activeRide, liveDriverLocatio
   );
 }
 
-// ─── Champ avec autocomplete ──────────────────────────────────────────────────
+// ─── Champ avec autocomplete ──────────────────���───────────────────────────────
 
 function AddressInput({
   value, onChange, placeholder, icon, suggestions, isSearching, onFocus, onBlur, onSelect,
@@ -252,6 +253,18 @@ export default function ClientHomePage() {
 
   const apiKey = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
   const selectedServiceData = SERVICE_TYPES.find(s => s.id === selectedService)!;
+
+  // ─── DÉMARRER LE MOTEUR DE DISPATCH ────────────────────────────────────────
+  // Le moteur doit tourner pour que les commandes soient traitées (pending → offered → assigned)
+  // Sans cela, les ride_requests restent "pending" indéfiniment si aucun dashboard n'est ouvert
+  const engineStartedRef = useRef(false);
+  useEffect(() => {
+    if (!engineStartedRef.current) {
+      getDispatchEngine(db).start();
+      engineStartedRef.current = true;
+      console.log('[v0] Dispatch Engine démarré depuis la page client');
+    }
+  }, []);
 
   // ─── Géolocalisation → adresse réelle ──────────────────────────────────────
   useEffect(() => {
