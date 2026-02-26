@@ -262,7 +262,6 @@ export default function ClientHomePage() {
     if (!engineStartedRef.current) {
       getDispatchEngine(db).start();
       engineStartedRef.current = true;
-      console.log('[v0] Dispatch Engine démarré depuis la page client');
     }
   }, []);
 

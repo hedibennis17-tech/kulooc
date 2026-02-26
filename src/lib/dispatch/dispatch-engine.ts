@@ -64,23 +64,39 @@ export interface DispatchRequest {
   offerExpiresAt?: Timestamp | null;
 }
 
+// ─── Helper pour obtenir la position du chauffeur ────────────────────────────
+function getDriverLocation(d: DispatchDriver): { latitude: number; longitude: number } | null {
+  // Supporte les deux formats: 'location' et 'currentLocation'
+  if (d.location?.latitude && d.location?.longitude) return d.location;
+  if ((d as any).currentLocation?.latitude && (d as any).currentLocation?.longitude) return (d as any).currentLocation;
+  return null;
+}
+
 // ─── Sélection du meilleur chauffeur ─────────────────────────────────────────
 function selectBestDriver(
   request: DispatchRequest,
   drivers: DispatchDriver[],
   maxRadiusKm = 30
 ): DispatchDriver | null {
-  const available = drivers.filter(
-    (d) => d.status === 'online' && d.location && !d.currentRideId
-  );
+  // CORRIGE: Un chauffeur est disponible si:
+  // - statut 'online' (pas 'en-route', 'on-trip', 'busy', 'offline')
+  // - a une position GPS valide (location OU currentLocation)
+  // - n'a PAS de course en cours (currentRideId null/undefined/empty)
+  const available = drivers.filter((d) => {
+    const isOnline = d.status === 'online';
+    const hasLocation = !!getDriverLocation(d);
+    const noActiveRide = !d.currentRideId || d.currentRideId === '';
+    return isOnline && hasLocation && noActiveRide;
+  });
   if (available.length === 0) return null;
 
   const pickupLat = request.pickup.latitude;
   const pickupLng = request.pickup.longitude;
 
   const scored = available.map((d) => {
+    const loc = getDriverLocation(d)!;
     const distKm = haversineKm(
-      d.location!.latitude, d.location!.longitude,
+      loc.latitude, loc.longitude,
       pickupLat, pickupLng
     );
     if (distKm > maxRadiusKm) return null;
@@ -384,6 +400,7 @@ export class DispatchEngine {
   /**
    * Assignation directe depuis le panneau de dispatch (bypass de l'offre).
    * Utilisé par useDispatch.assignDriver() pour l'assignation manuelle.
+   * CORRIGE: Crée une notification dans driver_offers pour que le chauffeur reçoive la course.
    */
   async directAssign(
     requestId: string,
@@ -397,6 +414,8 @@ export class DispatchEngine {
       clearTimeout(timeout);
       this.offerTimeouts.delete(requestId);
     }
+
+    let rideId = '';
 
     try {
       await runTransaction(this.db, async (tx) => {
@@ -412,6 +431,8 @@ export class DispatchEngine {
         }
 
         const rideRef = doc(collection(this.db, 'active_rides'));
+        rideId = rideRef.id;
+
         tx.set(rideRef, {
           requestId,
           passengerId: reqData.passengerId || '',
@@ -461,6 +482,18 @@ export class DispatchEngine {
           });
         }
       });
+
+      // IMPORTANT: Créer une notification pour le chauffeur (assignation manuelle directe)
+      // Le chauffeur reçoit cette notification via subscribeToDriverActiveRide
+      // Mais on crée aussi un enregistrement dans driver_offers pour la traçabilité
+      await setDoc(doc(this.db, 'driver_offers', `${requestId}_${driverId}`), {
+        requestId,
+        driverId,
+        status: 'accepted', // Déjà accepté car assignation manuelle
+        assignedManually: true,
+        activeRideId: rideId,
+        createdAt: serverTimestamp(),
+      }).catch(() => {});
 
       this.processingIds.delete(requestId);
       return { success: true };

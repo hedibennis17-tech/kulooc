@@ -41,7 +41,16 @@ function getElapsedTime(date: Date | any): string {
 }
 
 function getBestDrivers(request: RideRequest, drivers: DispatchDriver[], top = 3) {
-  const available = drivers.filter((d) => d.status === 'online' && (d.currentLocation || d.location));
+  // CORRIGE: Filtrer uniquement les chauffeurs VRAIMENT disponibles
+  // - statut 'online' (pas en-route, on-trip, busy, offline)
+  // - a une position GPS
+  // - PAS de course en cours (currentRideId null/undefined/empty)
+  const available = drivers.filter((d) => {
+    const isOnline = d.status === 'online';
+    const hasLocation = !!(d.currentLocation || d.location);
+    const noActiveRide = !d.currentRideId || d.currentRideId === '';
+    return isOnline && hasLocation && noActiveRide;
+  });
 
   return available
     .map((driver) => {
