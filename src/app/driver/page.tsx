@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Shield, SlidersHorizontal, TrendingUp, Plane, MapPin,
-  Navigation, CheckCircle2, Flag, DollarSign, Phone
+  Navigation, CheckCircle2, Flag, Phone
 } from 'lucide-react';
 import { useUser } from '@/firebase/provider';
 import { useDriver } from '@/lib/firestore/use-driver';
@@ -39,15 +39,15 @@ export default function DriverHomePage() {
   const engineStartedRef = useRef(false);
 
   const {
-    isOnline, activeRide, isLoading, onlineDuration, earningsToday,
-    ridesCompleted, currentLocation, goOnline, goOffline,
+    isOnline, activeRide, isLoading, onlineDuration,
+    currentLocation, goOnline, goOffline,
     arrivedAtPickup, startRide, completeRide,
   } = useDriver();
 
   const { currentOffer, countdown, isResponding, acceptOffer, declineOffer } =
     useDriverOffer(currentLocation ?? null);
 
-  // Moteur de dispatch
+  // ─── Moteur de dispatch (V2 — singleton, started guard) ───────────────────
   useEffect(() => {
     if (isOnline && !engineStartedRef.current) {
       getDispatchEngine(db).start();
@@ -58,7 +58,7 @@ export default function DriverHomePage() {
     }
   }, [isOnline]);
 
-  // Timer de course
+  // ─── Timer de course ───────────────────────────────────────────────────────
   useEffect(() => {
     if (activeRide?.status === 'in-progress') {
       if (!rideTimerRef.current)
@@ -70,7 +70,7 @@ export default function DriverHomePage() {
     return () => { if (rideTimerRef.current) clearInterval(rideTimerRef.current); };
   }, [activeRide?.status]);
 
-  // Mode navigation selon statut
+  // ─── Mode navigation selon statut ─────────────────────────────────────────
   useEffect(() => {
     if (!activeRide) { setNavMode(null); return; }
     if (activeRide.status === 'driver-assigned') setNavMode('to-pickup');
@@ -132,7 +132,7 @@ export default function DriverHomePage() {
   return (
     <div className="relative w-full h-screen overflow-hidden bg-gray-100 flex flex-col">
 
-      {/* ═══ CARTE / GPS ═══ */}
+      {/* ═══ CARTE / GPS — plein écran ═══ */}
       <div className="flex-1 relative min-h-0">
         {isNavActive && driverLatLng ? (
           /* GPS de navigation intégré — jamais de popup externe */
@@ -177,14 +177,15 @@ export default function DriverHomePage() {
           </APIProvider>
         )}
 
-        {/* Header KULOOC */}
+        {/* Header KULOOC — toujours visible sur la carte */}
         <div
           className="absolute left-0 right-0 z-10 flex items-center justify-between px-4"
-          style={{ top: isNavActive ? 'calc(env(safe-area-inset-top, 0px) + 108px)' : 'env(safe-area-inset-top, 12px)' }}
+          style={{ top: 'env(safe-area-inset-top, 12px)' }}
         >
           <div className="bg-white/95 backdrop-blur rounded-2xl px-3 py-2 shadow flex items-center gap-2">
             <span className="font-black text-red-600 text-lg">KULOOC</span>
             <span className="text-red-500">🍁</span>
+            <div className={`w-2.5 h-2.5 rounded-full ml-1 ${isOnline ? 'bg-green-500 animate-pulse' : 'bg-gray-400'}`} />
           </div>
           <div className="flex gap-2">
             <button onClick={() => setShowPreferences(true)}
@@ -198,7 +199,7 @@ export default function DriverHomePage() {
         </div>
       </div>
 
-      {/* ═══ PANNEAU BAS — Hors ligne / En attente ═══ */}
+      {/* ═══ PANNEAU BAS — Hors ligne / En attente (sans bloc gains) ═══ */}
       {!currentOffer && !activeRide && (
         <div className="bg-white shadow-2xl rounded-t-3xl z-20 flex-shrink-0">
           <button className="w-full flex items-center justify-center pt-3 pb-1"
@@ -216,18 +217,6 @@ export default function DriverHomePage() {
                   )}
                 </div>
               </div>
-              {isOnline && (
-                <div className="flex gap-4 text-right">
-                  <div>
-                    <p className="text-xs text-gray-500">Gains</p>
-                    <p className="font-black text-green-600 text-sm">{formatMoney(earningsToday)}</p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-gray-500">Courses</p>
-                    <p className="font-black text-sm">{ridesCompleted}</p>
-                  </div>
-                </div>
-              )}
             </div>
 
             {isOnline && panelExpanded && (
@@ -304,7 +293,6 @@ export default function DriverHomePage() {
                   <p className="font-bold">{currentOffer.passengerName}</p>
                   <p className="text-xs text-gray-500">Passager</p>
                 </div>
-
               </div>
 
               <div className="space-y-2 mb-5">
@@ -341,7 +329,7 @@ export default function DriverHomePage() {
         </Sheet>
       )}
 
-      {/* ═══ COURSE ACTIVE — Panneau bas ═══ */}
+      {/* ═══ COURSE ACTIVE — Panneau bas (sans bloc étapes blanc) ═══ */}
       {activeRide && (
         <div className="bg-white shadow-2xl rounded-t-3xl z-20 flex-shrink-0">
           <button className="w-full flex items-center justify-center pt-3 pb-1"
@@ -349,7 +337,9 @@ export default function DriverHomePage() {
             <div className="w-10 h-1 bg-gray-300 rounded-full" />
           </button>
           <div className="px-5 pb-6">
-            <div className="flex items-center justify-between mb-3">
+
+            {/* Statut + nom passager + durée */}
+            <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <div className={`w-2.5 h-2.5 rounded-full animate-pulse ${
                   activeRide.status === 'driver-assigned' ? 'bg-blue-500' :
@@ -371,27 +361,7 @@ export default function DriverHomePage() {
               )}
             </div>
 
-            <div className="flex items-center justify-between bg-gray-50 rounded-2xl p-3 mb-4">
-              <div className="flex items-center gap-2">
-                <DollarSign size={16} className="text-gray-400" />
-                <div>
-                  <p className="text-xs text-gray-400">{activeRide.status === 'in-progress' ? 'Compteur' : 'Prix estimé'}</p>
-                  <p className="text-xl font-black">
-                    {activeRide.status === 'in-progress'
-                      ? '0,00 $'
-                      : formatMoney(activeRide.estimatedPrice || activeRide.pricing?.total || 0)}
-                  </p>
-                </div>
-              </div>
-              <div className="text-right max-w-44">
-                <p className="text-xs text-gray-400">Destination</p>
-                <p className="font-semibold text-sm leading-tight">
-                  {activeRide.destination?.address || activeRide.destinationAddress}
-                </p>
-              </div>
-            </div>
-
-            {/* ── Bouton GPS — toujours visible quand course assignée ou en cours ── */}
+            {/* Bouton GPS — visible quand course assignée ou en cours */}
             {(activeRide.status === 'driver-assigned' || activeRide.status === 'in-progress') && (
               <button
                 onClick={() => {
