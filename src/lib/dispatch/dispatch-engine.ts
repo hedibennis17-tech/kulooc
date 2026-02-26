@@ -71,7 +71,9 @@ function selectBestDriver(
   maxRadiusKm = 30
 ): DispatchDriver | null {
   const available = drivers.filter(
-    (d) => d.status === 'online' && d.location && !d.currentRideId
+    // Accepter: online OU en-route/on-trip sans course active
+    // GPS optionnel: score neutre si pas de position
+    (d) => ['online', 'en-route', 'on-trip'].includes(d.status) && !d.currentRideId
   );
   if (available.length === 0) return null;
 
@@ -79,10 +81,10 @@ function selectBestDriver(
   const pickupLng = request.pickup.longitude;
 
   const scored = available.map((d) => {
-    const distKm = haversineKm(
-      d.location!.latitude, d.location!.longitude,
-      pickupLat, pickupLng
-    );
+    // GPS optionnel: si pas de position, distance neutre (5km)
+    const distKm = d.location
+      ? haversineKm(d.location.latitude, d.location.longitude, pickupLat, pickupLng)
+      : 5;
     if (distKm > maxRadiusKm) return null;
 
     const waitSeconds = d.onlineSince
