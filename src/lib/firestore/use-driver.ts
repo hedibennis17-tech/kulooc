@@ -1,16 +1,24 @@
 'use client';
-
 /**
- * KULOOC — Hook useDriver v2
+ * KULOOC — Hook useDriver v3
  * ─────────────────────────────────────────────────────────────────────────────
- * Gère l'état complet du chauffeur: statut, position GPS, demandes entrantes, course active.
+ * v3 — Persistance du statut "online" entre les changements de page :
  *
- * Corrections v2 :
+ *   1. Au MONTAGE : lit le statut depuis Firestore (drivers/{uid}.status)
+ *      → si "online" / "en-route" / "on-trip" / "busy", restaure l'état local
+ *   2. HEARTBEAT : toutes les 30s, écrit { status, lastHeartbeat } dans Firestore
+ *      tant que le chauffeur est online — maintient le statut actif même si
+ *      la page change (le composant se remonte et relit Firestore)
+ *   3. localStorage "kulooc_driver_online" : filet de sécurité côté client
+ *      pour restaurer l'état avant même que Firestore réponde
+ *   4. goOffline() EXPLICITE uniquement — jamais appelé automatiquement
+ *      au démontage du composant
+ *
+ * Corrections v2 conservées :
  *   - acceptRide() délègue à engine.acceptOffer() — plus de addDoc direct
  *   - completeRide() crée un enregistrement dans la collection `transactions`
  *   - Aucune création directe de active_rides dans ce hook
  */
-
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { useUser } from '@/firebase/provider';
 import {
@@ -45,7 +53,7 @@ export type UseDriverReturn = {
   currentLocation: { latitude: number; longitude: number } | null;
   isLoading: boolean;
   error: string | null;
-  onlineDuration: number; // seconds
+  onlineDuration: number;
   earningsToday: number;
   ridesCompleted: number;
   goOnline: () => Promise<void>;
@@ -57,9 +65,19 @@ export type UseDriverReturn = {
   completeRide: () => Promise<void>;
 };
 
+const ONLINE_STATUSES: DriverStatus[] = ['online', 'en-route', 'on-trip', 'busy'];
+const LS_KEY = 'kulooc_driver_online';
+const HEARTBEAT_MS = 30_000;
+
 export function useDriver(): UseDriverReturn {
   const { user } = useUser();
-  const [driverStatus, setDriverStatus] = useState<DriverStatus>('offline');
+
+  // ── Init depuis localStorage (instantané, avant Firestore) ────────────────
+  const [driverStatus, setDriverStatus] = useState<DriverStatus>(() => {
+    if (typeof window === 'undefined') return 'offline';
+    return localStorage.getItem(LS_KEY) === '1' ? 'online' : 'offline';
+  });
+
   const [pendingRequests, setPendingRequests] = useState<RideRequest[]>([]);
   const [activeRide, setActiveRide] = useState<ActiveRide | null>(null);
   const [currentLocation, setCurrentLocation] = useState<{ latitude: number; longitude: number } | null>(null);
@@ -68,17 +86,73 @@ export function useDriver(): UseDriverReturn {
   const [onlineDuration, setOnlineDuration] = useState(0);
   const [earningsToday, setEarningsToday] = useState(0);
   const [ridesCompleted, setRidesCompleted] = useState(0);
+
   const onlineTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const gpsWatchRef = useRef<number | null>(null);
   const rideStartTimeRef = useRef<Date | null>(null);
+  const activeRideRef = useRef<ActiveRide | null>(null);
 
-  const isOnline = driverStatus !== 'offline';
+  const isOnline = ONLINE_STATUSES.includes(driverStatus);
 
-  // Ref pour accéder à activeRide dans le callback GPS sans re-créer le watcher
-  const activeRideRef = useRef<typeof activeRide>(null);
   useEffect(() => { activeRideRef.current = activeRide; }, [activeRide]);
 
-  // ─── Écouter les demandes en attente (offered + pending) ──────────────────
+  // ── RESTAURATION DU STATUT AU MONTAGE depuis Firestore ───────────────────
+  useEffect(() => {
+    if (!user?.uid) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const snap = await getDoc(doc(db, 'drivers', user.uid));
+        if (cancelled) return;
+        const data = snap.data();
+        if (data?.status && ONLINE_STATUSES.includes(data.status as DriverStatus)) {
+          setDriverStatus(data.status as DriverStatus);
+          localStorage.setItem(LS_KEY, '1');
+        } else if (data?.status === 'offline') {
+          setDriverStatus('offline');
+          localStorage.removeItem(LS_KEY);
+        }
+      } catch {
+        // Firestore indisponible — on garde l'état localStorage
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.uid]);
+
+  // ── HEARTBEAT — maintient le statut online dans Firestore ─────────────────
+  useEffect(() => {
+    if (!isOnline || !user?.uid) {
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+      return;
+    }
+    const beat = async () => {
+      if (!user?.uid) return;
+      try {
+        await updateDoc(doc(db, 'drivers', user.uid), {
+          status: driverStatus,
+          lastHeartbeat: serverTimestamp(),
+          updatedAt: serverTimestamp(),
+        });
+      } catch {
+        // Silently fail
+      }
+    };
+    beat(); // premier battement immédiat
+    heartbeatRef.current = setInterval(beat, HEARTBEAT_MS);
+    return () => {
+      if (heartbeatRef.current) { clearInterval(heartbeatRef.current); heartbeatRef.current = null; }
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOnline, user?.uid, driverStatus]);
+
+  // ── Sync localStorage ─────────────────────────────────────────────────────
+  useEffect(() => {
+    if (isOnline) { localStorage.setItem(LS_KEY, '1'); }
+    else { localStorage.removeItem(LS_KEY); }
+  }, [isOnline]);
+
+  // ── Écouter les demandes en attente (offered + pending) ───────────────────
   useEffect(() => {
     if (!isOnline || !user) return;
     const unsub = subscribeToDriverPendingRequests((requests) => {
@@ -87,7 +161,7 @@ export function useDriver(): UseDriverReturn {
     return unsub;
   }, [isOnline, user]);
 
-  // ─── Écouter la course active ─────────────────────────────────────────────
+  // ── Écouter la course active ──────────────────────────────────────────────
   useEffect(() => {
     if (!user?.uid) return;
     const unsub = subscribeToDriverActiveRide(user.uid, (ride) => {
@@ -100,6 +174,7 @@ export function useDriver(): UseDriverReturn {
           if (!rideStartTimeRef.current) rideStartTimeRef.current = new Date();
         } else if (ride.status === 'completed') {
           setDriverStatus('online');
+          localStorage.setItem(LS_KEY, '1');
           setEarningsToday(prev => prev + (ride.pricing?.total ?? 0));
           setRidesCompleted(prev => prev + 1);
           rideStartTimeRef.current = null;
@@ -109,7 +184,7 @@ export function useDriver(): UseDriverReturn {
     return unsub;
   }, [user?.uid]);
 
-  // ─── Timer en ligne ───────────────────────────────────────────────────────
+  // ── Timer en ligne ────────────────────────────────────────────────────────
   useEffect(() => {
     if (isOnline) {
       onlineTimerRef.current = setInterval(() => {
@@ -124,10 +199,9 @@ export function useDriver(): UseDriverReturn {
     };
   }, [isOnline]);
 
-  // ─── GPS tracking ─────────────────────────────────────────────────────────
+  // ── GPS tracking ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!isOnline || !user?.uid || typeof navigator === 'undefined') return;
-
     if ('geolocation' in navigator) {
       gpsWatchRef.current = navigator.geolocation.watchPosition(
         async (position) => {
@@ -149,7 +223,6 @@ export function useDriver(): UseDriverReturn {
           }
         },
         (_err) => {
-          // Fallback: position simulée dans Laval
           const fallback = {
             latitude: 45.5631 + (Math.random() - 0.5) * 0.02,
             longitude: -73.7124 + (Math.random() - 0.5) * 0.02,
@@ -159,7 +232,6 @@ export function useDriver(): UseDriverReturn {
         { enableHighAccuracy: true, timeout: 10000, maximumAge: 5000 }
       );
     }
-
     return () => {
       if (gpsWatchRef.current !== null) {
         navigator.geolocation.clearWatch(gpsWatchRef.current);
@@ -167,14 +239,14 @@ export function useDriver(): UseDriverReturn {
     };
   }, [isOnline, user?.uid]);
 
-  // ─── Actions ──────────────────────────────────────────────────────────────
-
+  // ── Actions ───────────────────────────────────────────────────────────────
   const goOnline = useCallback(async () => {
     if (!user?.uid) return;
     setIsLoading(true);
     try {
       await updateDriverStatus(user.uid, 'online');
       setDriverStatus('online');
+      localStorage.setItem(LS_KEY, '1');
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -189,6 +261,7 @@ export function useDriver(): UseDriverReturn {
       await updateDriverStatus(user.uid, 'offline');
       setDriverStatus('offline');
       setPendingRequests([]);
+      localStorage.removeItem(LS_KEY);
     } catch (err: any) {
       setError(err.message);
     } finally {
@@ -262,10 +335,6 @@ export function useDriver(): UseDriverReturn {
     rideStartTimeRef.current = new Date();
   }, [activeRide]);
 
-  /**
-   * Terminer une course.
-   * Crée un enregistrement dans la collection `transactions` avec la répartition complète.
-   */
   const completeRide = useCallback(async () => {
     if (!activeRide?.id || !user?.uid) return;
     setIsLoading(true);
@@ -274,7 +343,6 @@ export function useDriver(): UseDriverReturn {
       if (!rideSnap.exists()) throw new Error('Course introuvable');
       const rideData = rideSnap.data();
 
-      // Calculer le tarif final basé sur la durée réelle
       const rideStartedAt = rideData.rideStartedAt?.toDate?.() || rideStartTimeRef.current || new Date();
       const actualDurationMin = Math.max(1, Math.round((Date.now() - rideStartedAt.getTime()) / 60000));
       const finalFare = calculateFare(
@@ -286,7 +354,6 @@ export function useDriver(): UseDriverReturn {
 
       const driverEarnings = finalFare.driverEarnings;
       const platformFee = finalFare.platformFee;
-      const completedAt = new Date();
 
       // 1. Mettre à jour active_ride
       await updateDoc(doc(db, 'active_rides', activeRide.id), {
@@ -303,7 +370,7 @@ export function useDriver(): UseDriverReturn {
       });
 
       // 2. Copier dans completed_rides
-      const completedRideData = {
+      await setDoc(doc(db, 'completed_rides', activeRide.id), {
         ...rideData,
         id: activeRide.id,
         status: 'completed',
@@ -316,8 +383,7 @@ export function useDriver(): UseDriverReturn {
         updatedAt: serverTimestamp(),
         driverEarnings,
         platformFee,
-      };
-      await setDoc(doc(db, 'completed_rides', activeRide.id), completedRideData);
+      });
 
       // 3. Créer un enregistrement de transaction financière
       await addDoc(collection(db, 'transactions'), {
@@ -328,7 +394,6 @@ export function useDriver(): UseDriverReturn {
         driverId: user.uid,
         driverName: rideData.driverName || user.displayName || 'Chauffeur',
         serviceType: rideData.serviceType || 'KULOOC X',
-        // Tarif complet
         base: finalFare.base,
         perKmCharge: finalFare.perKmCharge,
         perMinCharge: finalFare.perMinCharge,
@@ -339,18 +404,15 @@ export function useDriver(): UseDriverReturn {
         tps: finalFare.tps,
         tvq: finalFare.tvq,
         total: finalFare.total,
-        // Répartition
         driverEarnings,
         platformFee,
         driverShare: 0.70,
         platformShare: 0.30,
-        // Métriques de course
         distanceKm: finalFare.distanceKm,
         durationMin: actualDurationMin,
         estimatedDurationMin: rideData.estimatedDurationMin || 0,
         pickup: rideData.pickup,
         destination: rideData.destination,
-        // Timestamps
         rideStartedAt: rideData.rideStartedAt || null,
         completedAt: serverTimestamp(),
         createdAt: serverTimestamp(),
@@ -367,7 +429,7 @@ export function useDriver(): UseDriverReturn {
         }).catch(() => {});
       }
 
-      // 5. Remettre le chauffeur en ligne
+      // 5. Remettre le chauffeur en ligne (heartbeat reprend automatiquement)
       await updateDriverStatus(user.uid, 'online');
       await updateDoc(doc(db, 'drivers', user.uid), {
         currentRideId: null,
@@ -376,6 +438,7 @@ export function useDriver(): UseDriverReturn {
       }).catch(() => {});
 
       setDriverStatus('online');
+      localStorage.setItem(LS_KEY, '1');
       setEarningsToday(prev => prev + driverEarnings);
       setRidesCompleted(prev => prev + 1);
       rideStartTimeRef.current = null;
