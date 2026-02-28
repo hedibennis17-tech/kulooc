@@ -245,6 +245,10 @@ export default function ClientHomePage() {
   const [userPos, setUserPos] = useState(MONTREAL_CENTER);
   const [showSummary, setShowSummary] = useState(false);
   const [completedRide, setCompletedRide] = useState<LiveActiveRide | null>(null);
+  const [waitSeconds, setWaitSeconds] = useState(0);
+  const [inProgressTimer, setInProgressTimer] = useState(0);
+  const waitTimerRef = React.useRef<NodeJS.Timeout | null>(null);
+  const progressTimerRef = React.useRef<NodeJS.Timeout | null>(null);
   const [liveDriverLocation, setLiveDriverLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [driverProfile, setDriverProfile] = useState<any>(null);
   const activeRideRef = useRef<LiveActiveRide | null>(null);
@@ -415,6 +419,33 @@ export default function ClientHomePage() {
     }
   };
 
+  // ── Timer recherche chauffeur ─────────────────────────────────────────────
+  useEffect(() => {
+    if (step === 'waiting') {
+      setWaitSeconds(0);
+      waitTimerRef.current = setInterval(() => setWaitSeconds(s => s + 1), 1000);
+    } else {
+      if (waitTimerRef.current) { clearInterval(waitTimerRef.current); waitTimerRef.current = null; }
+      setWaitSeconds(0);
+    }
+    return () => { if (waitTimerRef.current) clearInterval(waitTimerRef.current); };
+  }, [step]);
+
+  // ── Timer course en cours ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (activeRide?.status === 'in-progress') {
+      setInProgressTimer(0);
+      progressTimerRef.current = setInterval(() => setInProgressTimer(s => s + 1), 1000);
+    } else {
+      if (progressTimerRef.current) { clearInterval(progressTimerRef.current); progressTimerRef.current = null; }
+      if (activeRide?.status !== 'in-progress') setInProgressTimer(0);
+    }
+    return () => { if (progressTimerRef.current) clearInterval(progressTimerRef.current); };
+  }, [activeRide?.status]);
+
+  const fmtWait = (s: number) => s < 60 ? `${s}s` : `${Math.floor(s/60)}m ${s%60}s`;
+  const fmtDur = (s: number) => { const m = Math.floor(s/60); return `${m}:${String(s%60).padStart(2,'0')}`; };
+
   const handleCancel = async () => {
     if (currentRequestId) await cancelRideRequest(currentRequestId).catch(() => {});
     setStep('search');
@@ -552,160 +583,298 @@ export default function ClientHomePage() {
   );
 
   const StepWaiting = () => (
-    <div className="space-y-4 py-4">
-      <div className="text-center">
-        <div className="w-16 h-16 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-3">
-          <div className="w-10 h-10 border-4 border-red-600 border-t-transparent rounded-full animate-spin" />
+    <div className="space-y-4 py-2">
+      {/* Bloc principal recherche */}
+      <div className="rounded-2xl overflow-hidden border border-gray-100 shadow-sm">
+        {/* Header animé */}
+        <div className="bg-gray-900 px-5 py-5 flex items-center gap-4">
+          {/* Icône animée */}
+          <div className="relative flex-shrink-0">
+            <div className="w-14 h-14 rounded-full bg-red-600 flex items-center justify-center">
+              <Car className="w-7 h-7 text-white" />
+            </div>
+            <div className="absolute inset-0 rounded-full border-2 border-red-500/50 animate-ping" />
+            <div className="absolute inset-0 rounded-full border-2 border-red-500/30" style={{ animation: 'ping 1.5s cubic-bezier(0,0,.2,1) infinite 0.5s' }} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-white font-black text-lg leading-tight">Recherche en cours</p>
+            <p className="text-white/50 text-sm mt-0.5">
+              {nearbyDrivers > 0
+                ? `${nearbyDrivers} chauffeur${nearbyDrivers > 1 ? 's' : ''} à proximité`
+                : 'Connexion aux chauffeurs...'}
+            </p>
+          </div>
+          {/* Chrono */}
+          <div className="flex-shrink-0 text-right">
+            <p className="text-white/40 text-xs">Attente</p>
+            <p className="text-white font-black text-xl font-mono">{fmtWait(waitSeconds)}</p>
+          </div>
         </div>
-        <h3 className="font-bold text-gray-900 text-lg">Recherche d&apos;un chauffeur</h3>
-        <p className="text-gray-400 text-sm mt-1">
-          {nearbyDrivers > 0
-            ? `${nearbyDrivers} chauffeur${nearbyDrivers > 1 ? 's' : ''} disponible${nearbyDrivers > 1 ? 's' : ''} à proximité`
-            : "Aucun chauffeur disponible pour l'instant..."}
-        </p>
-      </div>
-      <div className="bg-gray-50 rounded-xl p-4 space-y-2">
-        <div className="flex items-center gap-2 text-sm">
-          <div className="w-3 h-3 bg-black rounded-full" />
-          <span className="text-gray-600 truncate">{pickup}</span>
+
+        {/* Trajet */}
+        <div className="bg-white px-5 py-4 space-y-3">
+          <div className="flex items-start gap-3">
+            <div className="flex flex-col items-center gap-0.5 mt-1 flex-shrink-0">
+              <div className="w-2.5 h-2.5 rounded-full bg-gray-900" />
+              <div className="w-px h-6 bg-gray-200" />
+              <div className="w-2.5 h-2.5 rounded-sm bg-red-600" />
+            </div>
+            <div className="flex-1 space-y-3">
+              <div>
+                <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide">Départ</p>
+                <p className="text-sm font-semibold text-gray-900 leading-tight truncate">{pickup}</p>
+              </div>
+              <div>
+                <p className="text-xs text-gray-400 uppercase font-semibold tracking-wide">Destination</p>
+                <p className="text-sm font-semibold text-gray-900 leading-tight truncate">{destination}</p>
+              </div>
+            </div>
+          </div>
         </div>
-        <div className="flex items-center gap-2 text-sm">
-          <div className="w-3 h-3 bg-red-600 rounded-sm" />
-          <span className="text-gray-600 truncate">{destination}</span>
+
+        {/* Service + prix */}
+        <div className="bg-gray-50 px-5 py-3 flex items-center justify-between border-t border-gray-100">
+          <div className="flex items-center gap-2">
+            <div className="w-7 h-7 rounded-lg bg-red-600 flex items-center justify-center text-white text-xs font-black">K</div>
+            <span className="font-semibold text-sm text-gray-700">{selectedServiceData.name}</span>
+          </div>
+          <div className="text-right">
+            <p className="font-black text-gray-900">{est.price.toFixed(2)} $</p>
+            <p className="text-xs text-gray-400">TTC taxes incluses</p>
+          </div>
         </div>
       </div>
-      <div className="flex items-center justify-between text-sm bg-gray-50 rounded-xl p-3">
-        <span className="text-gray-500">{selectedServiceData.name}</span>
-        <span className="font-bold text-gray-900">${est.price.toFixed(2)}</span>
+
+      {/* Barre de progression animée */}
+      <div className="space-y-1.5">
+        <div className="flex items-center justify-between text-xs text-gray-400">
+          <span>Connexion aux chauffeurs proches</span>
+          <span className="font-mono">{fmtWait(waitSeconds)}</span>
+        </div>
+        <div className="w-full bg-gray-100 rounded-full h-1.5 overflow-hidden">
+          <div className="h-1.5 bg-red-600 rounded-full animate-[progress_2s_ease-in-out_infinite]"
+            style={{ width: '60%', animation: 'none', background: 'linear-gradient(90deg, #DC2626 0%, #EF4444 50%, #DC2626 100%)', backgroundSize: '200% 100%', animationName: 'shimmer', animationDuration: '1.5s', animationIterationCount: 'infinite' }} />
+        </div>
       </div>
-      <Button variant="outline" className="w-full h-11 border-red-200 text-red-600 hover:bg-red-50" onClick={handleCancel}>
-        <X className="w-4 h-4 mr-2" />
+
+      {/* Annuler */}
+      <button onClick={handleCancel}
+        className="w-full py-3 rounded-full border-2 border-gray-200 font-semibold text-gray-500 text-sm flex items-center justify-center gap-2 hover:border-red-200 hover:text-red-500 transition-colors">
+        <X className="w-4 h-4" />
         Annuler la demande
-      </Button>
+      </button>
     </div>
   );
 
-  const StepActive = () => activeRide ? (
-    <div className="space-y-3 py-2">
-      <div className={`flex items-center gap-3 rounded-xl p-3 ${
-        activeRide.status === 'driver-assigned' ? 'bg-blue-50' :
-        activeRide.status === 'driver-arrived' ? 'bg-amber-50' : 'bg-green-50'
-      }`}>
-        <div className={`w-9 h-9 rounded-full flex items-center justify-center flex-shrink-0 ${
-          activeRide.status === 'driver-assigned' ? 'bg-blue-100' :
-          activeRide.status === 'driver-arrived' ? 'bg-amber-100' : 'bg-green-100'
-        }`}>
-          <span className="text-lg">
-            {activeRide.status === 'driver-assigned' ? '🚗' :
-             activeRide.status === 'driver-arrived' ? '📍' : '🏁'}
-          </span>
+  const StepActive = () => {
+    if (!activeRide) return null;
+    const status = activeRide.status as string;
+
+    /* ── DRIVER ASSIGNED — en route vers toi ── */
+    if (status === 'driver-assigned') return (
+      <div className="space-y-3 py-1">
+        {/* Statut header */}
+        <div className="bg-blue-600 rounded-2xl p-4 flex items-center gap-3">
+          <div className="relative flex-shrink-0">
+            <div className="w-11 h-11 rounded-full bg-white/20 flex items-center justify-center">
+              <span className="text-xl">🚗</span>
+            </div>
+            <div className="absolute -bottom-0.5 -right-0.5 w-4 h-4 bg-green-400 rounded-full border-2 border-blue-600" />
+          </div>
+          <div className="flex-1">
+            <p className="text-white font-black text-base">Chauffeur en route !</p>
+            {liveDriverLocation && <p className="text-blue-200 text-xs mt-0.5">📡 Suivi GPS en direct</p>}
+          </div>
+          <div className="w-2.5 h-2.5 bg-blue-300 rounded-full animate-pulse" />
         </div>
-        <div className="flex-1">
-          <p className={`font-bold text-sm ${
-            activeRide.status === 'driver-assigned' ? 'text-blue-800' :
-            activeRide.status === 'driver-arrived' ? 'text-amber-800' : 'text-green-800'
-          }`}>
-            {activeRide.status === 'driver-assigned' && 'Chauffeur en route vers vous'}
-            {activeRide.status === 'driver-arrived' && '🎉 Votre chauffeur est arrivé !'}
-            {activeRide.status === 'in-progress' && 'Course en cours — Bon voyage !'}
-          </p>
-          {activeRide.status === 'driver-assigned' && liveDriverLocation && (
-            <p className="text-xs text-blue-600 mt-0.5">📡 Suivi GPS en direct activé</p>
+
+        {/* Carte chauffeur */}
+        <div className="bg-white rounded-2xl border border-gray-100 shadow-sm p-4">
+          <div className="flex items-center gap-3 mb-3">
+            <div className="relative">
+              <div className="w-14 h-14 rounded-full bg-gray-900 flex items-center justify-center border-2 border-gray-200 overflow-hidden">
+                {driverProfile?.photoURL
+                  ? <img src={driverProfile.photoURL} alt="" className="w-full h-full object-cover" />
+                  : <span className="text-white font-black text-xl">{(driverProfile?.name || activeRide.driverName || 'C').charAt(0).toUpperCase()}</span>}
+              </div>
+              <div className="absolute -bottom-1 -right-1 w-5 h-5 bg-green-500 rounded-full border-2 border-white flex items-center justify-center">
+                <span className="text-white text-xs">✓</span>
+              </div>
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="font-black text-gray-900 text-base">{driverProfile?.name || activeRide.driverName}</p>
+              <div className="flex items-center gap-1.5 mt-0.5">
+                <span className="text-yellow-400 text-sm">★</span>
+                <span className="text-sm font-semibold text-gray-700">{(driverProfile?.averageRating || 4.8).toFixed(1)}</span>
+                <span className="text-gray-300 text-xs">·</span>
+                <span className="text-xs font-bold text-red-600 bg-red-50 px-2 py-0.5 rounded-full">{activeRide.serviceType}</span>
+              </div>
+            </div>
+            {driverProfile?.phoneNumber && (
+              <a href={`tel:${driverProfile.phoneNumber}`}
+                className="w-11 h-11 bg-gray-900 rounded-full flex items-center justify-center shadow-md flex-shrink-0">
+                <Phone className="w-5 h-5 text-white" />
+              </a>
+            )}
+          </div>
+          {/* Véhicule */}
+          {(driverProfile?.vehicle?.model || driverProfile?.vehicle?.licensePlate) && (
+            <div className="flex items-center gap-2 pt-3 border-t border-gray-100">
+              <span className="text-sm text-gray-500">🚘 {driverProfile?.vehicle?.model}{driverProfile?.vehicle?.color ? ` · ${driverProfile.vehicle.color}` : ''}</span>
+              {driverProfile?.vehicle?.licensePlate && (
+                <span className="ml-auto font-mono font-bold text-xs bg-gray-100 px-2 py-1 rounded">{driverProfile.vehicle.licensePlate}</span>
+              )}
+            </div>
           )}
         </div>
-        <div className={`w-2.5 h-2.5 rounded-full animate-pulse flex-shrink-0 ${
-          activeRide.status === 'driver-assigned' ? 'bg-blue-500' :
-          activeRide.status === 'driver-arrived' ? 'bg-amber-500' : 'bg-green-500'
-        }`} />
-      </div>
 
-      <div className="bg-white border border-gray-100 rounded-2xl p-4 shadow-sm">
-        <div className="flex items-center gap-3">
-          <div className="relative flex-shrink-0">
-            <div className="w-14 h-14 rounded-full bg-gradient-to-br from-gray-700 to-gray-900 flex items-center justify-center overflow-hidden border-2 border-gray-200">
-              {driverProfile?.photoURL ? (
-                // eslint-disable-next-line @next/next/no-img-element
-                <img src={driverProfile.photoURL} alt="" className="w-full h-full object-cover" />
-              ) : (
-                <span className="text-white font-black text-xl">
-                  {(driverProfile?.name || activeRide.driverName || 'C').charAt(0).toUpperCase()}
-                </span>
-              )}
+        {/* Trajet + prix */}
+        <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-2">
+          <div className="flex items-start gap-2 text-sm">
+            <div className="flex flex-col items-center gap-0.5 mt-1 flex-shrink-0">
+              <div className="w-2 h-2 rounded-full bg-black" />
+              <div className="w-px h-5 bg-gray-300" />
+              <div className="w-2 h-2 rounded-sm bg-red-600" />
             </div>
-            <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white" />
+            <div className="flex-1 space-y-3">
+              <p className="text-gray-600 truncate leading-tight">{activeRide.pickup?.address}</p>
+              <p className="text-gray-900 font-semibold truncate leading-tight">{activeRide.destination?.address}</p>
+            </div>
+            <div className="flex-shrink-0 text-right">
+              <p className="font-black text-gray-900">{(activeRide.pricing?.total || activeRide.estimatedPrice || 0).toFixed(2)} $</p>
+              <p className="text-xs text-gray-400">{activeRide.estimatedDistanceKm?.toFixed(1)} km · ~{activeRide.estimatedDurationMin} min</p>
+            </div>
           </div>
-          <div className="flex-1 min-w-0">
-            <p className="font-black text-gray-900 text-base truncate">
-              {driverProfile?.name || activeRide.driverName}
-            </p>
-            <div className="flex items-center gap-1.5 mt-0.5">
-              <span className="text-yellow-400">★</span>
-              <span className="text-sm font-semibold text-gray-700">
-                {(driverProfile?.averageRating || 4.8).toFixed(1)}
-              </span>
-              {driverProfile?.totalRatings > 0 && (
-                <span className="text-xs text-gray-400">({driverProfile.totalRatings} avis)</span>
+        </div>
+      </div>
+    );
+
+    /* ── DRIVER ARRIVED — chauffeur sur place ── */
+    if (status === 'driver-arrived') return (
+      <div className="space-y-3 py-1">
+        {/* ALERTE HAUTE VISIBILITÉ */}
+        <div className="rounded-2xl overflow-hidden shadow-lg" style={{ background: 'linear-gradient(135deg, #d97706 0%, #b45309 100%)' }}>
+          <div className="px-5 py-5 text-center">
+            <div className="text-4xl mb-2">📍</div>
+            <p className="text-white font-black text-xl">Votre chauffeur est là !</p>
+            <p className="text-amber-200 text-sm mt-1">Il vous attend devant vous</p>
+          </div>
+          {/* Plaque + véhicule en évidence */}
+          {(driverProfile?.vehicle?.model || driverProfile?.vehicle?.licensePlate) && (
+            <div className="bg-black/20 px-5 py-3 flex items-center justify-between">
+              <span className="text-amber-200 text-sm">🚘 {driverProfile?.vehicle?.model}{driverProfile?.vehicle?.color ? ` · ${driverProfile.vehicle.color}` : ''}</span>
+              {driverProfile?.vehicle?.licensePlate && (
+                <span className="font-mono font-black text-white bg-white/20 px-3 py-1 rounded-lg text-sm tracking-widest">{driverProfile.vehicle.licensePlate}</span>
               )}
-              <span className="text-gray-300">·</span>
-              <span className="text-xs font-semibold text-red-600 bg-red-50 px-1.5 py-0.5 rounded-full">
-                {activeRide.serviceType}
-              </span>
             </div>
-            {driverProfile?.vehicle?.model && (
-              <p className="text-xs text-gray-500 mt-0.5">
-                🚗 {driverProfile.vehicle.model}
-                {driverProfile.vehicle.color && ` · ${driverProfile.vehicle.color}`}
-              </p>
-            )}
-            {driverProfile?.vehicle?.licensePlate && (
-              <p className="text-xs font-mono font-bold text-gray-700 mt-0.5 bg-gray-100 px-2 py-0.5 rounded inline-block">
-                {driverProfile.vehicle.licensePlate}
-              </p>
-            )}
+          )}
+        </div>
+
+        {/* Chauffeur */}
+        <div className="bg-white rounded-2xl border border-amber-100 p-4 flex items-center gap-3">
+          <div className="w-12 h-12 rounded-full bg-gray-900 flex items-center justify-center overflow-hidden border-2 border-amber-200 flex-shrink-0">
+            {driverProfile?.photoURL
+              ? <img src={driverProfile.photoURL} alt="" className="w-full h-full object-cover" />
+              : <span className="text-white font-black text-lg">{(driverProfile?.name || activeRide.driverName || 'C').charAt(0).toUpperCase()}</span>}
+          </div>
+          <div className="flex-1">
+            <p className="font-black text-gray-900">{driverProfile?.name || activeRide.driverName}</p>
+            <div className="flex items-center gap-1">
+              <span className="text-yellow-400 text-sm">★</span>
+              <span className="text-sm text-gray-600">{(driverProfile?.averageRating || 4.8).toFixed(1)}</span>
+            </div>
           </div>
           {driverProfile?.phoneNumber && (
             <a href={`tel:${driverProfile.phoneNumber}`}
-              className="w-11 h-11 bg-black rounded-full flex items-center justify-center flex-shrink-0 shadow-md">
+              className="w-11 h-11 bg-amber-600 rounded-full flex items-center justify-center shadow-md">
               <Phone className="w-5 h-5 text-white" />
             </a>
           )}
         </div>
-      </div>
 
-      <div className="bg-gray-50 rounded-xl p-3 space-y-2">
-        <div className="flex items-start gap-2 text-sm">
-          <div className="flex flex-col items-center gap-0.5 mt-0.5 flex-shrink-0">
-            <div className="w-3 h-3 rounded-full bg-black" />
-            <div className="w-px h-5 bg-gray-300" />
-            <div className="w-3 h-3 rounded-sm bg-red-600" />
-          </div>
-          <div className="flex-1 space-y-3">
-            <div>
-              <p className="text-xs text-gray-400 uppercase font-semibold">Prise en charge</p>
-              <p className="text-gray-700 truncate">{activeRide.pickup?.address}</p>
+        {/* Adresses */}
+        <div className="bg-gray-50 rounded-xl px-4 py-3 space-y-2">
+          <div className="flex items-start gap-2 text-sm">
+            <div className="flex flex-col items-center gap-0.5 mt-1 flex-shrink-0">
+              <div className="w-2 h-2 rounded-full bg-black" />
+              <div className="w-px h-5 bg-gray-300" />
+              <div className="w-2 h-2 rounded-sm bg-red-600" />
             </div>
-            <div>
-              <p className="text-xs text-gray-400 uppercase font-semibold">Destination</p>
-              <p className="text-gray-700 truncate font-medium">{activeRide.destination?.address}</p>
+            <div className="flex-1 space-y-3">
+              <p className="text-gray-600 truncate">{activeRide.pickup?.address}</p>
+              <p className="text-gray-900 font-semibold truncate">{activeRide.destination?.address}</p>
             </div>
           </div>
         </div>
       </div>
+    );
 
-      <div className="flex items-center justify-between bg-gray-50 rounded-xl p-3">
-        <div>
-          <p className="text-xs text-gray-400">Tarif estimé</p>
-          <p className="font-black text-gray-900 text-lg">
-            {(activeRide.pricing?.total || activeRide.estimatedPrice || 0).toFixed(2)} $
-          </p>
+    /* ── IN-PROGRESS — course en cours ── */
+    return (
+      <div className="space-y-3 py-1">
+        {/* Header cours en cours */}
+        <div className="bg-gray-900 rounded-2xl p-4 flex items-center gap-3">
+          <div className="w-11 h-11 rounded-full bg-green-600 flex items-center justify-center flex-shrink-0">
+            <span className="text-xl">🏁</span>
+          </div>
+          <div className="flex-1">
+            <p className="text-white font-black">Course en cours</p>
+            <p className="text-green-400 text-sm font-mono">{fmtDur(inProgressTimer)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-white/50 text-xs">Destination</p>
+            <p className="text-white font-bold text-sm truncate max-w-[110px]">{activeRide.destination?.address?.split(',')[0]}</p>
+          </div>
         </div>
-        <div className="text-right">
-          <p className="text-xs text-gray-400">{activeRide.estimatedDistanceKm?.toFixed(1)} km</p>
-          <p className="text-xs text-gray-400">~{activeRide.estimatedDurationMin} min</p>
+
+        {/* Stats course */}
+        <div className="grid grid-cols-3 divide-x divide-gray-100 bg-white border border-gray-100 rounded-2xl shadow-sm overflow-hidden">
+          {[
+            { label: 'Durée', value: fmtDur(inProgressTimer) },
+            { label: 'Distance', value: `${activeRide.estimatedDistanceKm?.toFixed(1)} km` },
+            { label: 'Prix', value: `${(activeRide.pricing?.total || activeRide.estimatedPrice || 0).toFixed(2)} $` },
+          ].map(({ label, value }) => (
+            <div key={label} className="py-4 text-center">
+              <p className="font-black text-gray-900 text-sm">{value}</p>
+              <p className="text-xs text-gray-400 mt-0.5">{label}</p>
+            </div>
+          ))}
+        </div>
+
+        {/* Trajet */}
+        <div className="bg-gray-50 rounded-xl px-4 py-3">
+          <div className="flex items-start gap-2 text-sm">
+            <div className="flex flex-col items-center gap-0.5 mt-1 flex-shrink-0">
+              <div className="w-2 h-2 rounded-full bg-black" />
+              <div className="w-px h-5 bg-gray-300" />
+              <div className="w-2 h-2 rounded-sm bg-red-600" />
+            </div>
+            <div className="flex-1 space-y-3">
+              <p className="text-gray-500 text-xs truncate">{activeRide.pickup?.address}</p>
+              <p className="text-gray-900 font-semibold truncate">{activeRide.destination?.address}</p>
+            </div>
+          </div>
+        </div>
+
+        {/* Chauffeur compact */}
+        <div className="bg-white border border-gray-100 rounded-2xl p-3 flex items-center gap-3 shadow-sm">
+          <div className="w-10 h-10 rounded-full bg-gray-900 flex items-center justify-center overflow-hidden flex-shrink-0">
+            {driverProfile?.photoURL
+              ? <img src={driverProfile.photoURL} alt="" className="w-full h-full object-cover" />
+              : <span className="text-white font-black">{(driverProfile?.name || activeRide.driverName || 'C').charAt(0).toUpperCase()}</span>}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="font-bold text-gray-900 text-sm">{driverProfile?.name || activeRide.driverName}</p>
+            <p className="text-xs text-gray-400">{driverProfile?.vehicle?.model || activeRide.serviceType}</p>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="text-yellow-400 text-sm">★</span>
+            <span className="text-sm font-semibold text-gray-700">{(driverProfile?.averageRating || 4.8).toFixed(1)}</span>
+          </div>
         </div>
       </div>
-    </div>
-  ) : null;
+    );
+  };
 
   // ════════════════════════════════════════════════════════════════════════════
   // VERSION MOBILE (< md) — identique à l'original
