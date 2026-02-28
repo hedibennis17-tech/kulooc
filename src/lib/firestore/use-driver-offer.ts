@@ -110,6 +110,7 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
 
   const acceptOffer = useCallback(async () => {
     if (!currentOffer || !user) return;
+    console.log('[v0] Accepting offer:', currentOffer.requestId, 'for driver:', user.uid);
     setIsResponding(true);
     try {
       const engine = getDispatchEngine(db);
@@ -119,8 +120,11 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
         user.displayName || 'Chauffeur',
         currentLocation
       );
+      console.log('[v0] acceptOffer result:', result);
       if (result.success) {
         setCurrentOffer(null);
+      } else {
+        console.error('[v0] acceptOffer failed:', result.error);
       }
     } finally {
       setIsResponding(false);

@@ -226,7 +226,8 @@ export class DispatchEngine {
       return;
     }
 
-    const offerExpiresAt = new Date(Date.now() + 60000); // 60 secondes
+    // Directive 4 : compte à rebours 15s pour l'offre (document workflow p.488)
+    const offerExpiresAt = new Date(Date.now() + 15000); // 15 secondes
     try {
       await updateDoc(doc(this.db, 'ride_requests', requestId), {
         offeredToDriverId: best.id,
@@ -254,7 +255,7 @@ export class DispatchEngine {
         createdAt: serverTimestamp(),
       });
 
-      // Timeout 60s : si pas de réponse → chauffeur suivant
+      // Timeout 15s : si pas de réponse → chauffeur suivant
       const timeout = setTimeout(async () => {
         this.offerTimeouts.delete(requestId);
         const snap = await getDoc(doc(this.db, 'ride_requests', requestId));
@@ -270,7 +271,7 @@ export class DispatchEngine {
           }).catch(() => {});
           await this.offerToNextDriver(requestId, [...excludedDriverIds, best!.id]);
         }
-      }, 60000);
+      }, 15000); // 15 secondes comme dans le workflow
 
       this.offerTimeouts.set(requestId, timeout);
     } catch {
