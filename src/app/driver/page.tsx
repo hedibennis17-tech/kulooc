@@ -12,7 +12,7 @@ import { useState, useEffect, useRef } from 'react';
 import { useRouter } from 'next/navigation';
 import {
   Shield, SlidersHorizontal, TrendingUp, Plane,
-  MapPin, Navigation, CheckCircle2, Flag, Phone, Star,
+  MapPin, Navigation, CheckCircle2, Flag, Phone,
 } from 'lucide-react';
 import { useUser } from '@/firebase/provider';
 import { useDriver } from '@/lib/firestore/use-driver';
@@ -23,7 +23,8 @@ import { useToast } from '@/hooks/use-toast';
 import { db } from '@/firebase';
 import { getDispatchEngine } from '@/lib/dispatch/dispatch-engine';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
-import { doc, addDoc, collection, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { doc, serverTimestamp, updateDoc } from 'firebase/firestore';
+import { RideSummary } from '@/components/kulooc/ride-summary';
 
 function fmtDur(s: number) {
   const m = Math.floor(s / 60);
@@ -31,8 +32,6 @@ function fmtDur(s: number) {
 }
 function fmtMoney(n: number) { return (n || 0).toFixed(2) + '\u00a0$'; }
 
-type RatingTag = 'Poli' | 'Propre' | 'À l\'heure' | 'Bon trajet' | 'Silencieux';
-const RATING_TAGS: RatingTag[] = ['Poli', 'Propre', 'À l\'heure', 'Bon trajet', 'Silencieux'];
 
 export default function DriverHomePage() {
   const { user, isUserLoading: userLoading } = useUser();
@@ -42,11 +41,11 @@ export default function DriverHomePage() {
   const [showPrefs, setShowPrefs] = useState(false);
   const [navMode, setNavMode] = useState<'to-pickup' | 'to-destination' | null>(null);
   const [rideTimer, setRideTimer] = useState(0);
-  const [showRating, setShowRating] = useState(false);
-  const [ratingStars, setRatingStars] = useState(5);
-  const [ratingTags, setRatingTags] = useState<RatingTag[]>([]);
+  const [showSummary, setShowSummary] = useState(false);
   const [completedRideId, setCompletedRideId] = useState<string | null>(null);
   const [completedPassengerId, setCompletedPassengerId] = useState<string | null>(null);
+  const [completedPricingSnap, setCompletedPricingSnap] = useState<any>(null);
+  const [completedRideSnap, setCompletedRideSnap] = useState<any>(null);
   const [routeInfo, setRouteInfo] = useState<RouteInfo | null>(null);
   const engineStartedRef = useRef(false);
   const rideTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -140,30 +139,23 @@ export default function DriverHomePage() {
   };
 
   const handleComplete = async () => {
-    const rideId = activeRide?.id || null;
-    const passId = activeRide?.passengerId || null;
+    const rideId      = activeRide?.id || null;
+    const passId      = activeRide?.passengerId || null;
+    const pricingSnap = activeRide?.pricing ?? null;
+    const rideSnap    = activeRide ?? null;
     await completeRide();
     setNavMode(null);
     setCompletedRideId(rideId);
     setCompletedPassengerId(passId);
-    setTimeout(() => setShowRating(true), 1500);
+    setCompletedPricingSnap(pricingSnap);
+    setCompletedRideSnap(rideSnap);
+    setTimeout(() => setShowSummary(true), 1200);
     toast({ title: '✅ Course terminée !', description: 'Gains mis à jour.' });
   };
 
-  const handleSubmitRating = async () => {
-    setShowRating(false);
-    if (completedRideId && completedPassengerId && user?.uid) {
-      await addDoc(collection(db, 'ratings'), {
-        rideId: completedRideId,
-        raterId: user.uid,
-        ratedId: completedPassengerId,
-        raterRole: 'driver',
-        stars: ratingStars,
-        tags: ratingTags,
-        createdAt: serverTimestamp(),
-      }).catch(() => {});
-    }
-    // PING — remet le chauffeur online (filet de sécurité)
+  const handleSummaryClose = async () => {
+    setShowSummary(false);
+    // PING — filet de sécurité: remet le chauffeur online
     if (user?.uid) {
       fetch('/api/driver-ping', {
         method: 'POST',
@@ -174,8 +166,11 @@ export default function DriverHomePage() {
         status: 'online', currentRideId: null, updatedAt: serverTimestamp(),
       }).catch(() => {});
     }
-    setRatingStars(5); setRatingTags([]); setCompletedRideId(null); setCompletedPassengerId(null);
-    toast({ title: '⭐ Évaluation envoyée !', description: 'Prêt pour la prochaine course.' });
+    setCompletedRideId(null);
+    setCompletedPassengerId(null);
+    setCompletedPricingSnap(null);
+    setCompletedRideSnap(null);
+    toast({ title: '⭐ Prêt pour la prochaine course !', description: '' });
   };
 
   // ── Positions ─────────────────────────────────────────────────────────────
@@ -542,38 +537,23 @@ export default function DriverHomePage() {
       )}
 
       {/* ══════════════════════════════════════════════════════════════
-          MODAL ÉVALUATION PASSAGER
+          REÇU + ÉVALUATION — RideSummary (SAAS UX)
       ══════════════════════════════════════════════════════════════ */}
-      <Sheet open={showRating} onOpenChange={(o) => { if (!o) handleSubmitRating(); }}>
-        <SheetContent side="bottom" className="rounded-t-3xl z-[60] p-0">
-          <div className="p-5">
-            <SheetTitle className="text-xl font-black text-center mb-1">Évaluer le passager</SheetTitle>
-            <p className="text-sm text-gray-500 text-center mb-5">Comment s&apos;est passée la course ?</p>
-            <div className="flex justify-center gap-3 mb-5">
-              {[1, 2, 3, 4, 5].map(s => (
-                <button key={s} onClick={() => setRatingStars(s)}>
-                  <Star size={36} className={s <= ratingStars ? 'text-yellow-400 fill-yellow-400' : 'text-gray-300'} />
-                </button>
-              ))}
-            </div>
-            <div className="flex flex-wrap gap-2 justify-center mb-5">
-              {RATING_TAGS.map(tag => (
-                <button key={tag}
-                  onClick={() => setRatingTags(t => t.includes(tag) ? t.filter(x => x !== tag) : [...t, tag])}
-                  className={`px-4 py-2 rounded-full text-sm font-semibold border transition-all ${
-                    ratingTags.includes(tag) ? 'bg-black text-white border-black' : 'bg-white text-gray-700 border-gray-300'
-                  }`}>
-                  {tag}
-                </button>
-              ))}
-            </div>
-            <button onClick={handleSubmitRating}
-              className="w-full py-4 rounded-full bg-red-600 text-white font-black text-base shadow-lg">
-              ✅ Soumettre l&apos;évaluation
-            </button>
-          </div>
-        </SheetContent>
-      </Sheet>
+      {showSummary && completedRideId && completedPassengerId && (
+        <RideSummary
+          rideId={completedRideId}
+          passengerId={completedPassengerId}
+          passengerName={completedRideSnap?.passengerName || 'Passager'}
+          driverId={user?.uid || ''}
+          driverName={user?.displayName || user?.email || 'Chauffeur'}
+          pickup={completedRideSnap?.pickup || { address: '—' }}
+          destination={completedRideSnap?.destination || { address: '—' }}
+          pricing={completedPricingSnap || { total: completedRideSnap?.estimatedPrice || 0 }}
+          actualDurationMin={completedRideSnap?.actualDurationMin}
+          userRole="driver"
+          onClose={handleSummaryClose}
+        />
+      )}
 
       {/* ══════════════════════════════════════════════════════════════
           Sheet préférences

@@ -41,6 +41,28 @@ interface NavigationMapProps {
 }
 
 // ─── Composant interne qui utilise useMap ───────────────────────────────────
+
+// ─── Flèche de manœuvre SVG — comme l'image (flèche blanche dans bloc coloré) ──
+function ManeuverArrow({ maneuver }: { maneuver: string }) {
+  // Rotation selon la manœuvre
+  const rotation = maneuver.includes('left') ? -45
+    : maneuver.includes('right') ? 45
+    : maneuver.includes('uturn') ? 180
+    : maneuver.includes('sharp-left') ? -90
+    : maneuver.includes('sharp-right') ? 90
+    : 0; // tout droit par défaut
+
+  return (
+    <svg width="36" height="36" viewBox="0 0 36 36" fill="none"
+      style={{ transform: `rotate(${rotation}deg)`, transition: 'transform 0.3s' }}>
+      {/* Flèche vers le haut */}
+      <path d="M18 4 L18 28" stroke="white" strokeWidth="4" strokeLinecap="round"/>
+      <path d="M8 14 L18 4 L28 14" stroke="white" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+    </svg>
+  );
+}
+
+
 function NavigationRenderer({
   origin,
   destination,
@@ -344,100 +366,106 @@ function NavigationRenderer({
 
   return (
     <>
-      {/* ── Bandeau instruction en haut ── */}
+      {/* ── HEADER GPS — exactement comme l'image ── */}
       {currentStep && (
-        <div
-          className="absolute top-0 left-0 right-0 z-20 px-4 pt-safe"
-          style={{ paddingTop: 'env(safe-area-inset-top, 12px)' }}
-        >
+        <div className="absolute top-0 left-0 right-0 z-20" style={{ paddingTop: 'env(safe-area-inset-top, 0px)' }}>
+
+          {/* Ligne 1 — flèche + distance + instruction */}
           <div
-            className="rounded-2xl shadow-2xl p-4 flex items-center gap-3"
-            style={{ background: mode === 'to-pickup' ? '#1D4ED8' : '#DC2626' }}
+            className="flex items-start gap-0 shadow-2xl"
+            style={{ background: '#0D0D0D' }}
           >
-            {/* Icône manœuvre */}
-            <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center text-2xl flex-shrink-0">
-              {getManeuverIcon(currentStep.maneuver || '')}
+            {/* Bloc flèche coloré — exactement comme l'image */}
+            <div
+              className="flex-shrink-0 flex items-center justify-center"
+              style={{
+                background: mode === 'to-pickup' ? '#2563EB' : '#DC2626',
+                width: 80,
+                minHeight: 84,
+                alignSelf: 'stretch',
+              }}
+            >
+              <ManeuverArrow maneuver={currentStep.maneuver || ''} />
             </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-white font-bold text-base leading-tight line-clamp-2">
+
+            {/* Distance + instruction */}
+            <div className="flex-1 px-4 py-3 min-w-0">
+              <p className="text-white font-black leading-none" style={{ fontSize: 32 }}>
+                {currentStep.distance}
+              </p>
+              <p className="text-white font-bold text-base leading-tight mt-0.5 line-clamp-1">
+                {/* Extraire "vers X" de l'instruction */}
+                {currentStep.instruction.split(' ').slice(0, 3).join(' ')}
+              </p>
+              <p className="text-white/55 text-xs mt-0.5 line-clamp-2 leading-snug">
                 {currentStep.instruction}
               </p>
-              <p className="text-white/70 text-sm mt-0.5">{currentStep.distance}</p>
             </div>
-            {/* Boussole */}
-            <div className="flex flex-col items-center gap-1 flex-shrink-0">
-              <div
-                className="w-8 h-8 bg-white/20 rounded-full flex items-center justify-center"
-                style={{
-                  transform: `rotate(${-heading}deg)`,
-                  transition: 'transform 0.3s',
-                }}
-              >
-                <Compass size={16} className="text-white" />
-              </div>
-              <span className="text-white/60 text-xs">{heading}°</span>
-            </div>
+
+            {/* Bouton son */}
+            <button
+              onClick={() => setVoiceEnabled(v => !v)}
+              className="flex-shrink-0 w-11 h-11 m-3 rounded-full bg-white/10 flex items-center justify-center border border-white/20"
+            >
+              {voiceEnabled
+                ? <Volume2 size={16} className="text-white" />
+                : <VolumeX size={16} className="text-red-400" />}
+            </button>
+          </div>
+
+          {/* Ligne 2 — stats : durée | distance | vitesse | destination */}
+          <div
+            className="flex items-center gap-0 px-4 py-2"
+            style={{ background: 'rgba(13,13,13,0.97)', borderBottom: '1px solid rgba(255,255,255,0.08)' }}
+          >
+            <span className="text-white font-black text-sm">{totalDuration}</span>
+            <span className="text-white/30 mx-2">|</span>
+            <span className="text-white/80 text-sm font-semibold">{totalDistance}</span>
+            <span className="text-white/30 mx-2">|</span>
+            <span className="text-white/80 text-sm font-semibold">{speed} <span className="text-white/40 font-normal text-xs">km/h</span></span>
+            <span className="text-white/30 mx-2">|</span>
+            <span className="text-white/60 text-xs flex-1 truncate">
+              {destinationLabel || 'Destination'}
+            </span>
           </div>
 
           {/* Prochaine instruction */}
           {nextStep && (
-            <div className="mt-2 bg-white/95 backdrop-blur rounded-xl px-4 py-2 flex items-center gap-2 shadow">
-              <span className="text-gray-400 text-sm">Ensuite :</span>
-              <span className="text-gray-800 text-sm font-semibold truncate">{nextStep.instruction}</span>
-              <span className="text-gray-400 text-xs ml-auto flex-shrink-0">{nextStep.distance}</span>
+            <div
+              className="px-4 py-2 flex items-center gap-2"
+              style={{ background: 'rgba(20,20,20,0.95)' }}
+            >
+              <span className="text-white/40 text-xs">Ensuite :</span>
+              <span className="text-white/80 text-xs font-semibold flex-1 truncate">{nextStep.instruction}</span>
+              <span className="text-white/40 text-xs flex-shrink-0">{nextStep.distance}</span>
             </div>
           )}
         </div>
       )}
 
-      {/* ── Contrôles navigation en bas à droite ── */}
-      <div className="absolute right-4 bottom-56 z-20 flex flex-col gap-2">
-        {/* Bouton son */}
+      {/* ── Bouton recentrer (droite) ── */}
+      <div className="absolute right-4 z-20" style={{ bottom: 260 }}>
         <button
-          onClick={() => setVoiceEnabled(v => !v)}
-          className="w-11 h-11 rounded-full bg-white shadow-lg flex items-center justify-center border border-gray-200"
-        >
-          {voiceEnabled
-            ? <Volume2 size={18} className="text-gray-700" />
-            : <VolumeX size={18} className="text-red-500" />}
-        </button>
-
-        {/* Recentrer */}
-        <button
-          onClick={() => {
-            if (map) {
-              map.panTo(currentPos);
-              map.setZoom(17);
-            }
-          }}
+          onClick={() => { if (map) { map.panTo(currentPos); map.setZoom(17); } }}
           className="w-11 h-11 rounded-full bg-white shadow-lg flex items-center justify-center border border-gray-200"
         >
           <RotateCcw size={18} className="text-gray-700" />
         </button>
       </div>
 
-      {/* ── Barre de progression des étapes ── */}
+      {/* ── Barre étapes — style image (1/20 avec flèches + recenter) ── */}
       {steps.length > 0 && (
-        <div className="absolute bottom-52 left-4 right-4 z-20">
-          <div className="bg-white/95 backdrop-blur rounded-2xl px-4 py-2 flex items-center gap-2 shadow-lg">
+        <div className="absolute left-4 right-4 z-20" style={{ bottom: 204 }}>
+          <div className="bg-white rounded-2xl shadow-xl flex items-center overflow-hidden" style={{ height: 52 }}>
             <button
               onClick={() => setCurrentStepIndex(i => Math.max(0, i - 1))}
               disabled={currentStepIndex === 0}
-              className="p-1 disabled:opacity-30"
+              className="w-10 flex items-center justify-center h-full disabled:opacity-30 border-r border-gray-100"
             >
-              <ChevronLeft size={18} className="text-gray-600" />
+              <ChevronLeft size={20} className="text-gray-600" />
             </button>
             <div className="flex-1 text-center">
-              <p className="text-xs text-gray-500">Étape {currentStepIndex + 1}/{steps.length}</p>
-              <div className="w-full bg-gray-200 rounded-full h-1.5 mt-1">
-                <div
-                  className="h-1.5 rounded-full transition-all"
-                  style={{
-                    width: `${((currentStepIndex + 1) / steps.length) * 100}%`,
-                    background: modeColor,
-                  }}
-                />
-              </div>
+              <p className="font-bold text-gray-900 text-sm">{currentStepIndex + 1} / {steps.length}</p>
             </div>
             <button
               onClick={() => {
@@ -446,14 +474,16 @@ function NavigationRenderer({
                 if (steps[next]) speak(steps[next].instruction);
               }}
               disabled={currentStepIndex === steps.length - 1}
-              className="p-1 disabled:opacity-30"
+              className="w-10 flex items-center justify-center h-full disabled:opacity-30 border-l border-r border-gray-100"
             >
-              <ChevronRight size={18} className="text-gray-600" />
+              <ChevronRight size={20} className="text-gray-600" />
             </button>
-            <div className="border-l border-gray-200 pl-3 text-right">
-              <p className="text-xs font-bold text-gray-800">{totalDuration}</p>
-              <p className="text-xs text-gray-500">{totalDistance}</p>
-            </div>
+            <button
+              onClick={() => { if (map) { map.panTo(currentPos); map.setZoom(17); } }}
+              className="w-10 flex items-center justify-center h-full border-l border-gray-100"
+            >
+              <RotateCcw size={16} className="text-gray-600" />
+            </button>
           </div>
         </div>
       )}

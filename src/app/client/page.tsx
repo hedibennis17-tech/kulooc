@@ -18,7 +18,7 @@ import { APIProvider, Map, AdvancedMarker } from '@vis.gl/react-google-maps';
 import { autocompleteAddress, reverseGeocode, type AutocompletePrediction } from '@/app/actions/places';
 import { useGeolocation } from '@/lib/hooks/use-geolocation';
 import { calculateFare, generateInvoiceText } from '@/lib/services/fare-service';
-import { RatingModal } from '@/components/kulooc/rating-modal';
+import { RideSummary } from '@/components/kulooc/ride-summary';
 import { db } from '@/firebase';
 import { onSnapshot, doc } from 'firebase/firestore';
 
@@ -243,9 +243,8 @@ export default function ClientHomePage() {
   const [isLoading, setIsLoading] = useState(false);
   const [liveDrivers, setLiveDrivers] = useState<LiveDriver[]>([]);
   const [userPos, setUserPos] = useState(MONTREAL_CENTER);
-  const [showRatingModal, setShowRatingModal] = useState(false);
+  const [showSummary, setShowSummary] = useState(false);
   const [completedRide, setCompletedRide] = useState<LiveActiveRide | null>(null);
-  const [showInvoice, setShowInvoice] = useState(false);
   const [liveDriverLocation, setLiveDriverLocation] = useState<{ latitude: number; longitude: number } | null>(null);
   const [driverProfile, setDriverProfile] = useState<any>(null);
   const activeRideRef = useRef<LiveActiveRide | null>(null);
@@ -328,9 +327,8 @@ export default function ClientHomePage() {
           setDestination('');
           setLiveDriverLocation(null);
           setDriverProfile(null);
-          setShowInvoice(true);
+          setTimeout(() => setShowSummary(true), 1200);
           toast({ title: '✅ Course terminée !', description: "Merci d'avoir choisi KULOOC 🍁" });
-          setTimeout(() => setShowRatingModal(true), 2500);
         }
       } else {
         if (prev && ['driver-assigned', 'driver-arrived', 'in-progress'].includes(prev)) {
@@ -1000,56 +998,20 @@ export default function ClientHomePage() {
       <MobileView />
       <DesktopView />
 
-      {/* Facture post-course */}
-      {showInvoice && completedRide && (
-        <div className="fixed inset-0 bg-black/60 z-50 flex items-end justify-center">
-          <div className="bg-white rounded-t-3xl w-full max-w-lg p-6 max-h-[85vh] overflow-y-auto">
-            <div className="flex items-center justify-between mb-4">
-              <h2 className="text-xl font-black">Votre reçu de course</h2>
-              <button onClick={() => setShowInvoice(false)} className="text-gray-400 hover:text-gray-600">
-                <X size={20} />
-              </button>
-            </div>
-            <div className="bg-gray-50 rounded-2xl p-4 text-sm font-mono whitespace-pre-wrap text-gray-700 mb-4">
-              {generateInvoiceText({
-                id: completedRide.id,
-                passengerName: completedRide.passengerName,
-                driverName: completedRide.driverName,
-                pickup: completedRide.pickup,
-                destination: completedRide.destination,
-                pricing: completedRide.pricing as any,
-                completedAt: (completedRide as any).completedAt,
-                actualDurationMin: completedRide.actualDurationMin,
-              })}
-            </div>
-            <div className="flex gap-3">
-              <button
-                onClick={() => { setShowInvoice(false); setShowRatingModal(true); }}
-                className="flex-[2] py-3 rounded-full bg-red-600 text-white font-black"
-              >
-                Évaluer le chauffeur
-              </button>
-              <button
-                onClick={() => setShowInvoice(false)}
-                className="flex-1 py-3 rounded-full border-2 border-gray-200 font-semibold text-gray-600"
-              >
-                Fermer
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Modal d'évaluation */}
-      {showRatingModal && completedRide && user && (
-        <RatingModal
+      {/* Reçu + Évaluation — RideSummary SAAS UX */}
+      {showSummary && completedRide && user && (
+        <RideSummary
           rideId={completedRide.id}
-          raterId={user.uid}
-          raterName={user.displayName || user.email || 'Passager'}
-          raterRole="passenger"
-          targetId={completedRide.driverId}
-          targetName={completedRide.driverName}
-          onClose={() => setShowRatingModal(false)}
+          passengerId={user.uid}
+          passengerName={user.displayName || user.email || 'Passager'}
+          driverId={completedRide.driverId}
+          driverName={completedRide.driverName}
+          pickup={completedRide.pickup}
+          destination={completedRide.destination}
+          pricing={completedRide.pricing as any ?? { total: completedRide.estimatedPrice || 0 }}
+          actualDurationMin={completedRide.actualDurationMin}
+          userRole="passenger"
+          onClose={() => setShowSummary(false)}
         />
       )}
     </>
