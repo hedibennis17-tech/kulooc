@@ -251,10 +251,14 @@ export function subscribeToDriverActiveRide(
     limit(1)
   );
 
+  console.log('[v0] subscribeToDriverActiveRide: listening for driver', driverId);
+
   return onSnapshot(q, (snap) => {
+    console.log('[v0] active_rides snapshot: found', snap.size, 'rides for driver', driverId);
     if (!snap.empty) {
       const d = snap.docs[0];
       const ride = { id: d.id, ...d.data() } as ActiveRide;
+      console.log('[v0] Active ride detected:', ride.id, 'status:', ride.status);
 
       if (ride.status === 'completed') {
         const completedAt = (ride.rideCompletedAt || ride.completedAt) as Timestamp | undefined;

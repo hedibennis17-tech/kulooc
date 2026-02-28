@@ -360,6 +360,7 @@ export class DispatchEngine {
       }).catch(() => {});
 
       this.processingIds.delete(requestId);
+      console.log('[v0] acceptOffer SUCCESS: active_ride created for driver', driverId, 'request', requestId);
       return { success: true };
     } catch (e: any) {
       return { success: false, error: e.message };

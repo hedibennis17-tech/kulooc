@@ -1,6 +1,14 @@
 {
   "indexes": [
     {
+      "collectionGroup": "driver_offers",
+      "queryScope": "COLLECTION",
+      "fields": [
+        { "fieldPath": "driverId", "order": "ASCENDING" },
+        { "fieldPath": "status", "order": "ASCENDING" }
+      ]
+    },
+    {
       "collectionGroup": "ride_requests",
       "queryScope": "COLLECTION",
       "fields": [
@@ -30,7 +38,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "passengerId", "order": "ASCENDING" },
-        { "fieldPath": "status", "arrayConfig": "CONTAINS" }
+        { "fieldPath": "status", "order": "ASCENDING" }
       ]
     },
     {
@@ -38,7 +46,7 @@
       "queryScope": "COLLECTION",
       "fields": [
         { "fieldPath": "driverId", "order": "ASCENDING" },
-        { "fieldPath": "status", "arrayConfig": "CONTAINS" }
+        { "fieldPath": "status", "order": "ASCENDING" }
       ]
     },
     {
