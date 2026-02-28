@@ -298,6 +298,9 @@ export default function ClientHomePage() {
     if (user && firestoreDb) updateClientPresence(firestoreDb, user.uid).catch(() => {});
   }, [user, firestoreDb]);
 
+  // Note: Le dispatch engine n'est plus démarré côté client.
+  // L'API /api/dispatch gère l'assignation côté serveur.
+
   // ─── Chauffeurs en temps réel ───────────────────────────────────────────────
   useEffect(() => {
     if (!firestoreDb) return;
@@ -407,9 +410,30 @@ export default function ClientHomePage() {
       setStep('waiting');
       toast({ title: '🚗 Course demandée !', description: "Recherche d'un chauffeur en cours..." });
 
-      // Le Dispatch Engine détecte automatiquement la ride_request via onSnapshot
-      // et assigne le meilleur chauffeur disponible — aucun appel API nécessaire
-      console.log('[KULOOC] ride_request créée:', requestId, '— moteur dispatch en attente');
+      // Appeler l'API dispatch pour déclencher l'assignation côté serveur
+      // Cela fonctionne même si le dashboard dispatcher n'est pas ouvert
+      console.log('[v0] ride_request created:', requestId, '- calling dispatch API');
+      
+      fetch('/api/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ requestId }),
+      })
+        .then(res => res.json())
+        .then(data => {
+          console.log('[v0] dispatch API response:', data);
+          if (data.offered) {
+            toast({ title: 'Chauffeur trouvé !', description: 'En attente de confirmation...' });
+          } else if (data.noDriversAvailable) {
+            toast({ 
+              title: 'Recherche en cours...', 
+              description: 'Nous cherchons un chauffeur disponible.' 
+            });
+          }
+        })
+        .catch(err => {
+          console.warn('[v0] dispatch API error (non-blocking):', err);
+        });
     } catch {
       toast({ title: 'Erreur', description: 'Impossible de créer la course.', variant: 'destructive' });
     } finally {

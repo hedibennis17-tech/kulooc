@@ -308,6 +308,7 @@ export async function updateDriverLocation(
 }
 
 // ─── Mettre à jour le statut du chauffeur ─────────────────────────────────────
+// Note: utilisez updateDriverStatusWithInfo() si vous avez les infos du chauffeur
 
 export async function updateDriverStatus(
   driverId: string,
@@ -323,10 +324,54 @@ export async function updateDriverStatus(
   if (status === 'online') updates.onlineSince = serverTimestamp();
   if (status === 'offline') {
     updates.onlineSince = null;
-    updates.location = null;
+    // Ne pas effacer la location pour permettre de la retrouver plus tard
   }
 
   await setDoc(doc(db, 'drivers', driverId), updates, { merge: true });
+  console.log('[v0] Driver status updated:', driverId, status);
+}
+
+/**
+ * Met à jour le statut du chauffeur avec toutes les infos nécessaires au dispatch.
+ * Utilisé lors du premier passage en ligne pour s'assurer que le doc contient
+ * tous les champs requis par le dispatch engine.
+ */
+export async function updateDriverStatusWithInfo(
+  driverId: string,
+  status: 'online' | 'offline' | 'en-route' | 'on-trip' | 'busy',
+  info: {
+    name?: string;
+    displayName?: string;
+    email?: string;
+    phoneNumber?: string;
+    location?: { latitude: number; longitude: number };
+  }
+): Promise<void> {
+  const driverName = info.name || info.displayName || info.email?.split('@')[0] || 'Chauffeur';
+  
+  const updates: Record<string, unknown> = {
+    status,
+    name: driverName,
+    driverName: driverName,
+    updatedAt: serverTimestamp(),
+    lastSeen: serverTimestamp(),
+    isOnline: status !== 'offline',
+  };
+
+  if (info.email) updates.email = info.email;
+  if (info.phoneNumber) updates.phoneNumber = info.phoneNumber;
+  if (info.location) updates.location = info.location;
+
+  if (status === 'online') {
+    updates.onlineSince = serverTimestamp();
+    updates.currentRideId = null;
+  }
+  if (status === 'offline') {
+    updates.onlineSince = null;
+  }
+
+  await setDoc(doc(db, 'drivers', driverId), updates, { merge: true });
+  console.log('[v0] Driver status updated with info:', driverId, status, driverName);
 }
 
 // ─── Calculer le tarif d'une course ───────────────────────────────────────────

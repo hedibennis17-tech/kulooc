@@ -104,20 +104,26 @@ service cloud.firestore {
     // ── ride_requests ─────────────────────────────────────────────────────────
     // Directive 7 : protection stricte
     //   - Création : client authentifié uniquement (passengerId == uid)
-    //   - Lecture : passager propriétaire, chauffeur assigné, admin
+    //   - Lecture : passager propriétaire, chauffeur assigné, admin, ou chauffeur actif
     //   - Mise à jour : passager (annulation), chauffeur assigné (accepter/refuser), admin
     //   - Suppression : passager propriétaire ou admin
+    //
+    // Note: Pour le dispatch engine, les chauffeurs actifs peuvent lire les demandes
+    // pending pour recevoir des offres. Le dispatch engine filtre ensuite côté serveur.
     match /ride_requests/{requestId} {
       allow create: if isSignedIn() && (
         request.resource.data.passengerId == uid() ||
         request.resource.data.userId == uid()
       );
+      // Lecture : admin peut tout voir, sinon le participant ou chauffeur actif
       allow read: if isAdmin() || (
         isSignedIn() && (
           resource.data.passengerId == uid() ||
           resource.data.userId == uid() ||
           resource.data.offeredToDriverId == uid() ||
-          resource.data.driverId == uid()
+          resource.data.driverId == uid() ||
+          // Chauffeurs actifs peuvent voir les demandes pending pour le dispatch
+          isDriver()
         )
       );
       // Mise à jour : admin (dispatch), chauffeur assigné (accepter/refuser), passager (annuler)
@@ -126,7 +132,9 @@ service cloud.firestore {
           resource.data.passengerId == uid() ||
           resource.data.userId == uid() ||
           resource.data.offeredToDriverId == uid() ||
-          resource.data.driverId == uid()
+          resource.data.driverId == uid() ||
+          // Chauffeurs peuvent mettre à jour pour accepter/refuser des offres
+          isDriver()
         )
       );
       allow delete: if isAdmin() || (

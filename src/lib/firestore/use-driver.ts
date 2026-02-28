@@ -23,6 +23,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { useUser } from '@/firebase/provider';
 import {
   updateDriverStatus,
+  updateDriverStatusWithInfo,
   updateDriverLocation,
   updateRideStatus,
   subscribeToDriverPendingRequests,
@@ -248,27 +249,45 @@ export function useDriver(): UseDriverReturn {
     if (!user?.uid) return;
     setIsLoading(true);
     try {
-      await updateDriverStatus(user.uid, 'online');
+      // Obtenir la position GPS d'abord si possible
+      let initialLocation: { latitude: number; longitude: number } | undefined;
+      
+      if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
+        try {
+          const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+            navigator.geolocation.getCurrentPosition(resolve, reject, {
+              enableHighAccuracy: false,
+              timeout: 5000,
+              maximumAge: 30000
+            });
+          });
+          initialLocation = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
+          setCurrentLocation(initialLocation);
+        } catch {
+          // GPS non disponible - le moteur dispatch accepte les chauffeurs sans position
+          console.log('[v0] GPS non disponible, le chauffeur sera visible sans position');
+        }
+      }
+
+      // Utiliser updateDriverStatusWithInfo pour s'assurer que le document
+      // contient toutes les infos nécessaires au dispatch engine
+      await updateDriverStatusWithInfo(user.uid, 'online', {
+        name: user.displayName || undefined,
+        email: user.email || undefined,
+        phoneNumber: user.phoneNumber || undefined,
+        location: initialLocation,
+      });
+      
       setDriverStatus('online');
       localStorage.setItem(LS_KEY, '1');
-      // Obtenir la position GPS immédiatement pour que le moteur trouve ce chauffeur
-      if (typeof navigator !== 'undefined' && 'geolocation' in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          async (pos) => {
-            const loc = { latitude: pos.coords.latitude, longitude: pos.coords.longitude };
-            setCurrentLocation(loc);
-            try { await updateDriverLocation(user.uid!, loc); } catch {}
-          },
-          () => { /* Pas de GPS — le moteur utilise distance 5km par défaut */ },
-          { enableHighAccuracy: false, timeout: 5000, maximumAge: 30000 }
-        );
-      }
+      console.log('[v0] Driver is now online:', user.uid);
     } catch (err: any) {
       setError(err.message);
+      console.error('[v0] Error going online:', err.message, err);
     } finally {
       setIsLoading(false);
     }
-  }, [user?.uid]);
+  }, [user]);
 
   const goOffline = useCallback(async () => {
     if (!user?.uid) return;

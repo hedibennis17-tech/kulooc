@@ -76,8 +76,12 @@ export async function POST(req: NextRequest) {
       query(collection(db, 'drivers'), where('status', '==', 'online'))
     );
 
+    console.log('[api/dispatch] found', driversSnap.size, 'online drivers');
+
     const drivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Array<{
       id: string;
+      name?: string;
+      driverName?: string;
       status: string;
       location?: { latitude: number; longitude: number };
       currentRideId?: string | null;
@@ -85,7 +89,9 @@ export async function POST(req: NextRequest) {
       averageRating?: number;
     }>;
 
-    const available = drivers.filter(d => d.status === 'online' && d.location && !d.currentRideId);
+    // Filtrer: online, pas de course active (location optionnelle car certains chauffeurs n'ont pas GPS)
+    const available = drivers.filter(d => d.status === 'online' && !d.currentRideId);
+    console.log('[api/dispatch]', available.length, 'available drivers (no active ride)');
 
     if (available.length === 0) {
       // Marquer comme "searching" pour que le dashboard le voit clairement
@@ -108,10 +114,10 @@ export async function POST(req: NextRequest) {
     const pickupLng = reqData.pickup?.longitude ?? -73.7124;
 
     const scored = available.map(d => {
-      const distKm = haversineKm(
-        d.location!.latitude, d.location!.longitude,
-        pickupLat, pickupLng
-      );
+      // GPS optionnel: si pas de position, distance neutre (5km)
+      const distKm = d.location
+        ? haversineKm(d.location.latitude, d.location.longitude, pickupLat, pickupLng)
+        : 5;
       const waitSeconds = d.onlineSince?.seconds
         ? (Date.now() / 1000) - d.onlineSince.seconds
         : 0;
@@ -123,6 +129,8 @@ export async function POST(req: NextRequest) {
     });
     scored.sort((a, b) => b.score - a.score);
     const best = scored[0].driver;
+    const bestDriverName = best.driverName || best.name || 'Chauffeur';
+    console.log('[api/dispatch] selected driver:', best.id, bestDriverName, 'score:', scored[0].score.toFixed(2));
 
     // 4. Créer l'offre dans Firestore
     const { Timestamp, setDoc } = await import('firebase/firestore');
@@ -130,6 +138,7 @@ export async function POST(req: NextRequest) {
 
     await updateDoc(doc(db, 'ride_requests', requestId), {
       offeredToDriverId: best.id,
+      offeredToDriverName: bestDriverName,
       offerExpiresAt: Timestamp.fromDate(offerExpiresAt),
       offerSentAt: serverTimestamp(),
       status: 'offered',
@@ -157,7 +166,8 @@ export async function POST(req: NextRequest) {
       assigned: false,
       offered: true,
       driverId: best.id,
-      message: `Offre envoyée au chauffeur ${best.id}`,
+      driverName: bestDriverName,
+      message: `Offre envoyée au chauffeur ${bestDriverName}`,
     });
 
   } catch (err: any) {

@@ -70,12 +70,20 @@ function selectBestDriver(
   drivers: DispatchDriver[],
   maxRadiusKm = 30
 ): DispatchDriver | null {
-  const available = drivers.filter(
-    // Accepter: online OU en-route/on-trip sans course active
-    // GPS optionnel: score neutre si pas de position
-    (d) => ['online', 'en-route', 'on-trip'].includes(d.status) && !d.currentRideId
-  );
-  if (available.length === 0) return null;
+  // Filtrer les chauffeurs disponibles (online uniquement, sans course active)
+  const available = drivers.filter((d) => {
+    // Le chauffeur doit être online et ne pas avoir de course active
+    const isAvailable = d.status === 'online' && !d.currentRideId;
+    if (!isAvailable) return false;
+    return true;
+  });
+
+  console.log('[v0] Dispatch: checking', available.length, 'available drivers out of', drivers.length, 'total');
+  
+  if (available.length === 0) {
+    console.log('[v0] Dispatch: no available drivers found');
+    return null;
+  }
 
   const pickupLat = request.pickup.latitude;
   const pickupLng = request.pickup.longitude;
@@ -85,7 +93,12 @@ function selectBestDriver(
     const distKm = d.location
       ? haversineKm(d.location.latitude, d.location.longitude, pickupLat, pickupLng)
       : 5;
-    if (distKm > maxRadiusKm) return null;
+    
+    // Si le rayon max est dépassé et que le chauffeur a une position connue, exclure
+    if (distKm > maxRadiusKm && d.location) {
+      console.log('[v0] Driver', d.name || d.id, 'excluded: distance', distKm.toFixed(1), 'km > max', maxRadiusKm, 'km');
+      return null;
+    }
 
     const waitSeconds = d.onlineSince
       ? (Date.now() / 1000) - (d.onlineSince as Timestamp).seconds
@@ -99,9 +112,15 @@ function selectBestDriver(
     return { driver: d, distKm, score: total };
   }).filter(Boolean) as Array<{ driver: DispatchDriver; distKm: number; score: number }>;
 
-  if (scored.length === 0) return null;
+  if (scored.length === 0) {
+    console.log('[v0] Dispatch: no drivers within range');
+    return null;
+  }
+  
   scored.sort((a, b) => b.score - a.score);
-  return scored[0].driver;
+  const best = scored[0];
+  console.log('[v0] Dispatch: selected', best.driver.name || best.driver.id, 'at', best.distKm.toFixed(1), 'km, score', best.score.toFixed(2));
+  return best.driver;
 }
 
 // ─── Moteur principal ─────────────────────────────────────────────────────────
@@ -160,7 +179,11 @@ export class DispatchEngine {
 
   /** Déclencher manuellement le traitement d'une demande (ex: depuis useDispatch) */
   public async processRequest(request: DispatchRequest) {
-    if (this.processingIds.has(request.id)) return;
+    if (this.processingIds.has(request.id)) {
+      console.log('[v0] Dispatch: request', request.id, 'already being processed');
+      return;
+    }
+    console.log('[v0] Dispatch: processing new request', request.id, 'from', request.passengerName);
     this.processingIds.add(request.id);
     await this.offerToNextDriver(request.id, []);
   }
@@ -189,11 +212,13 @@ export class DispatchEngine {
 
     if (!best) {
       // Aucun chauffeur disponible — laisser en pending, réessayer dans 30s
+      console.log('[v0] Dispatch: no driver available for request', requestId, '- retrying in 30s');
       setTimeout(() => {
         this.processingIds.delete(requestId);
         // Re-vérifier si toujours pending
         getDoc(doc(this.db, 'ride_requests', requestId)).then((snap) => {
           if (snap.exists() && snap.data().status === 'pending') {
+            console.log('[v0] Dispatch: retrying request', requestId);
             this.processRequest({ id: snap.id, ...snap.data() } as DispatchRequest);
           }
         });

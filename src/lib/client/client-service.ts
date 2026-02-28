@@ -116,13 +116,34 @@ export async function updateClientProfile(
 
 /**
  * Crée une demande de course dans Firestore.
+ * IMPORTANT: Le dispatch engine écoute `ride_requests` avec status='pending'
+ * et utilise `requestedAt` pour le tri, pas `createdAt`.
  */
 export async function createRideRequest(request: Omit<RideRequest, 'createdAt' | 'status'>): Promise<string> {
-  const ref = await addDoc(collection(db, 'ride_requests'), {
+  // Normaliser les coordonnées pour le dispatch engine
+  const normalizedRequest = {
     ...request,
+    pickup: {
+      address: request.pickup.address,
+      latitude: request.pickup.latitude ?? request.pickup.lat ?? 0,
+      longitude: request.pickup.longitude ?? request.pickup.lng ?? 0,
+    },
+    destination: {
+      address: request.destination.address,
+      latitude: request.destination.latitude ?? request.destination.lat ?? 0,
+      longitude: request.destination.longitude ?? request.destination.lng ?? 0,
+    },
+    estimatedDistanceKm: request.estimatedDistanceKm ?? request.estimatedDistance ?? 0,
+    estimatedDurationMin: request.estimatedDurationMin ?? request.estimatedDuration ?? 0,
+    surgeMultiplier: request.surgeMultiplier ?? 1.0,
     status: 'pending',
+    requestedAt: serverTimestamp(), // Pour le dispatch engine
     createdAt: serverTimestamp(),
-  });
+    updatedAt: serverTimestamp(),
+  };
+  
+  const ref = await addDoc(collection(db, 'ride_requests'), normalizedRequest);
+  console.log('[v0] ride_request created:', ref.id, 'status: pending');
   return ref.id;
 }
 

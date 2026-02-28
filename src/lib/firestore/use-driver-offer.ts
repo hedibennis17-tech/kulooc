@@ -48,9 +48,11 @@ export function useDriverOffer(currentLocation: { latitude: number; longitude: n
     );
 
     const unsub = onSnapshot(q, (snap) => {
+      console.log('[v0] driver_offers snapshot:', snap.size, 'offers for driver', user?.uid);
       if (!snap.empty) {
         const offerDoc = snap.docs[0];
         const offer = { id: offerDoc.id, ...offerDoc.data() } as DriverOffer;
+        console.log('[v0] Current offer:', offer.requestId, 'from', offer.passengerName);
         setCurrentOffer(offer);
 
         // Directive 4 : countdown 15s
