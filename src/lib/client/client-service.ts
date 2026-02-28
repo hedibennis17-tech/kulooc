@@ -143,7 +143,6 @@ export async function createRideRequest(request: Omit<RideRequest, 'createdAt' |
   };
   
   const ref = await addDoc(collection(db, 'ride_requests'), normalizedRequest);
-  console.log('[v0] ride_request created:', ref.id, 'status: pending');
   return ref.id;
 }
 

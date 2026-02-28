@@ -78,10 +78,7 @@ function selectBestDriver(
     return true;
   });
 
-  console.log('[v0] Dispatch: checking', available.length, 'available drivers out of', drivers.length, 'total');
-  
   if (available.length === 0) {
-    console.log('[v0] Dispatch: no available drivers found');
     return null;
   }
 
@@ -96,7 +93,6 @@ function selectBestDriver(
     
     // Si le rayon max est dépassé et que le chauffeur a une position connue, exclure
     if (distKm > maxRadiusKm && d.location) {
-      console.log('[v0] Driver', d.name || d.id, 'excluded: distance', distKm.toFixed(1), 'km > max', maxRadiusKm, 'km');
       return null;
     }
 
@@ -113,14 +109,11 @@ function selectBestDriver(
   }).filter(Boolean) as Array<{ driver: DispatchDriver; distKm: number; score: number }>;
 
   if (scored.length === 0) {
-    console.log('[v0] Dispatch: no drivers within range');
     return null;
   }
   
   scored.sort((a, b) => b.score - a.score);
-  const best = scored[0];
-  console.log('[v0] Dispatch: selected', best.driver.name || best.driver.id, 'at', best.distKm.toFixed(1), 'km, score', best.score.toFixed(2));
-  return best.driver;
+  return scored[0].driver;
 }
 
 // ─── Moteur principal ─────────────────────────────────────────────────────────
@@ -180,10 +173,8 @@ export class DispatchEngine {
   /** Déclencher manuellement le traitement d'une demande (ex: depuis useDispatch) */
   public async processRequest(request: DispatchRequest) {
     if (this.processingIds.has(request.id)) {
-      console.log('[v0] Dispatch: request', request.id, 'already being processed');
       return;
     }
-    console.log('[v0] Dispatch: processing new request', request.id, 'from', request.passengerName);
     this.processingIds.add(request.id);
     await this.offerToNextDriver(request.id, []);
   }
@@ -212,13 +203,11 @@ export class DispatchEngine {
 
     if (!best) {
       // Aucun chauffeur disponible — laisser en pending, réessayer dans 30s
-      console.log('[v0] Dispatch: no driver available for request', requestId, '- retrying in 30s');
       setTimeout(() => {
         this.processingIds.delete(requestId);
         // Re-vérifier si toujours pending
         getDoc(doc(this.db, 'ride_requests', requestId)).then((snap) => {
           if (snap.exists() && snap.data().status === 'pending') {
-            console.log('[v0] Dispatch: retrying request', requestId);
             this.processRequest({ id: snap.id, ...snap.data() } as DispatchRequest);
           }
         });

@@ -76,8 +76,6 @@ export async function POST(req: NextRequest) {
       query(collection(db, 'drivers'), where('status', '==', 'online'))
     );
 
-    console.log('[api/dispatch] found', driversSnap.size, 'online drivers');
-
     const drivers = driversSnap.docs.map(d => ({ id: d.id, ...d.data() })) as Array<{
       id: string;
       name?: string;
@@ -91,7 +89,6 @@ export async function POST(req: NextRequest) {
 
     // Filtrer: online, pas de course active (location optionnelle car certains chauffeurs n'ont pas GPS)
     const available = drivers.filter(d => d.status === 'online' && !d.currentRideId);
-    console.log('[api/dispatch]', available.length, 'available drivers (no active ride)');
 
     if (available.length === 0) {
       // Marquer comme "searching" pour que le dashboard le voit clairement
@@ -130,7 +127,6 @@ export async function POST(req: NextRequest) {
     scored.sort((a, b) => b.score - a.score);
     const best = scored[0].driver;
     const bestDriverName = best.driverName || best.name || 'Chauffeur';
-    console.log('[api/dispatch] selected driver:', best.id, bestDriverName, 'score:', scored[0].score.toFixed(2));
 
     // 4. Créer l'offre dans Firestore
     const { Timestamp, setDoc } = await import('firebase/firestore');

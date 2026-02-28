@@ -265,7 +265,6 @@ export function useDriver(): UseDriverReturn {
           setCurrentLocation(initialLocation);
         } catch {
           // GPS non disponible - le moteur dispatch accepte les chauffeurs sans position
-          console.log('[v0] GPS non disponible, le chauffeur sera visible sans position');
         }
       }
 
@@ -280,10 +279,8 @@ export function useDriver(): UseDriverReturn {
       
       setDriverStatus('online');
       localStorage.setItem(LS_KEY, '1');
-      console.log('[v0] Driver is now online:', user.uid);
     } catch (err: any) {
       setError(err.message);
-      console.error('[v0] Error going online:', err.message, err);
     } finally {
       setIsLoading(false);
     }

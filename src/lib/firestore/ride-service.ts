@@ -251,14 +251,10 @@ export function subscribeToDriverActiveRide(
     limit(1)
   );
 
-  console.log('[v0] subscribeToDriverActiveRide: listening for driver', driverId);
-
   return onSnapshot(q, (snap) => {
-    console.log('[v0] active_rides snapshot:', snap.size, 'rides for driver', driverId);
     if (!snap.empty) {
       const d = snap.docs[0];
       const ride = { id: d.id, ...d.data() } as ActiveRide;
-      console.log('[v0] Active ride found:', ride.id, 'status:', ride.status);
 
       if (ride.status === 'completed') {
         const completedAt = (ride.rideCompletedAt || ride.completedAt) as Timestamp | undefined;
@@ -332,7 +328,6 @@ export async function updateDriverStatus(
   }
 
   await setDoc(doc(db, 'drivers', driverId), updates, { merge: true });
-  console.log('[v0] Driver status updated:', driverId, status);
 }
 
 /**
@@ -375,7 +370,6 @@ export async function updateDriverStatusWithInfo(
   }
 
   await setDoc(doc(db, 'drivers', driverId), updates, { merge: true });
-  console.log('[v0] Driver status updated with info:', driverId, status, driverName);
 }
 
 // ─── Calculer le tarif d'une course ───────────────────────────────────────────

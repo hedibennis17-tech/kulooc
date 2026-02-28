@@ -166,7 +166,7 @@ function ClientMapView({ apiKey, drivers, userPos, activeRide, liveDriverLocatio
   );
 }
 
-// ─── Champ avec autocomplete ──────────────────────────────────────────────────
+// ─── Champ avec autocomplete ──────────────────���───────────────────────────────
 
 function AddressInput({
   value, onChange, placeholder, icon, suggestions, isSearching, onFocus, onBlur, onSelect,
@@ -412,8 +412,6 @@ export default function ClientHomePage() {
 
       // Appeler l'API dispatch pour déclencher l'assignation côté serveur
       // Cela fonctionne même si le dashboard dispatcher n'est pas ouvert
-      console.log('[v0] ride_request created:', requestId, '- calling dispatch API');
-      
       fetch('/api/dispatch', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -421,7 +419,6 @@ export default function ClientHomePage() {
       })
         .then(res => res.json())
         .then(data => {
-          console.log('[v0] dispatch API response:', data);
           if (data.offered) {
             toast({ title: 'Chauffeur trouvé !', description: 'En attente de confirmation...' });
           } else if (data.noDriversAvailable) {
@@ -431,8 +428,8 @@ export default function ClientHomePage() {
             });
           }
         })
-        .catch(err => {
-          console.warn('[v0] dispatch API error (non-blocking):', err);
+        .catch(() => {
+          // Erreur non-bloquante - le système réessaiera
         });
     } catch {
       toast({ title: 'Erreur', description: 'Impossible de créer la course.', variant: 'destructive' });

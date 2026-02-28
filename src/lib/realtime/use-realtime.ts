@@ -54,7 +54,6 @@ export function useRealtime() {
     // Le moteur est un singleton donc il ne démarrera qu'une seule fois
     const engine = getDispatchEngine(db);
     engine.start();
-    console.log('[v0] Dispatch engine started from useRealtime hook');
 
     const unsubs: (() => void)[] = [];
 
